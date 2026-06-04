@@ -95,14 +95,18 @@ QList<Contact> WeChatAdapter::getContacts() {
     }
 
     QString key = m_keys.isEmpty() ? QString() : m_keys.first();
-    QList<WeChatContact> wechatContacts = m_decoder->getAllContacts(m_dataDir, key);
-
-    for (const WeChatContact& wc : wechatContacts) {
+    QList<WeChatContact> weChatContacts = m_decoder->getAllContacts(m_dataDir, m_keys.isEmpty() ? QString() : m_keys.first());
+    
+    for (const WeChatContact& wc : weChatContacts) {
         Contact contact;
         contact.id = wc.id;
         contact.name = wc.name;
         contact.remark = wc.remark.isEmpty() ? wc.name : wc.remark;
         contact.platform = Platform::WeChat;
+        contact.platformIcon = m_platformIcon;
+        contact.avatar = QPixmap();  // TODO: 加载头像
+        contact.extra = QVariant::fromValue(wc);
+        
         contacts.append(contact);
     }
 

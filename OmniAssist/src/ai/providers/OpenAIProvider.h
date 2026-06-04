@@ -12,7 +12,7 @@ class OpenAIProvider : public QObject, public IAIServiceProvider {
 
 public:
     explicit OpenAIProvider(QObject* parent = nullptr);
-    ~OpenAIProvider();
+    ~OpenAIProvider() override = default;
 
     QString generateReply(const QList<ChatMessage>& context) override;
     QJsonObject generateSummary(const QList<ChatMessage>& context) override;

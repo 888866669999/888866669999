@@ -210,8 +210,8 @@ bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
     QByteArray p1HmacData = page1.mid(16, 4096 - 80);
     QByteArray p1StoredHmac = page1.mid(4096 - 64, 64);
     
-    // 微信使用 HMAC-SHA1 进行校验
-    QByteArray calculatedHmac = hmacSha1(macKey, p1HmacData);
+    // 微信使用 HMAC-SHA512 进行校验（存储 64 字节）
+    QByteArray calculatedHmac = hmacSha512(macKey, p1HmacData);
     
     return calculatedHmac == p1StoredHmac;
 }
