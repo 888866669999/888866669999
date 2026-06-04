@@ -37,6 +37,7 @@ public:
 
     bool extractKeysFromMemory(QStringList* keys);
     QString findQQDataDir();
+    bool decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key);
 
     QList<QQContact> getAllContacts(const QString& dbPath, const QString& key);
     QList<QQMessage> getChatHistory(const QString& dbPath, const QString& key, 

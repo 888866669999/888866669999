@@ -15,6 +15,7 @@
 #include <QList>
 #include <QTabWidget>
 #include <QFrame>
+#include <QDialog>
 
 class WeChatAdapter;
 class QQAdapter;
@@ -40,12 +41,26 @@ private slots:
     void onApiKeyChanged(const QString& key);
     void onSearchChanged(const QString& text);
     void onPlatformChanged(int index);
+    void onSettingsClicked();
 
 private:
     void setupUI();
     void setupConnections();
     void loadContacts();
     void loadChatHistory();
+    void setupSettingsDialog();
+    void onRefreshProcesses();
+    void onCaptureWeChatProcess();
+    void onCaptureQQProcess();
+    void onSaveSettings();
+
+    QWidget* m_settingsDialog;
+    QLineEdit* m_wechatInstallEdit;
+    QLineEdit* m_wechatDataEdit;
+    QLineEdit* m_qqInstallEdit;
+    QLineEdit* m_qqDataEdit;
+    QListWidget* m_wechatProcessList;
+    QListWidget* m_qqProcessList;
 
     QWidget* m_leftPanel;
     QWidget* m_rightPanel;

@@ -57,6 +57,7 @@ private:
     QByteArray deriveKey(const QByteArray& password, const QByteArray& salt, int iterations, int dklen);
     QByteArray hmacSha1(const QByteArray& key, const QByteArray& data);
     QByteArray hmacSha512(const QByteArray& key, const QByteArray& data);
+    QByteArray aes256CbcDecrypt(const QByteArray& key, const QByteArray& iv, const QByteArray& data);
 
     QString m_lastDbPath;
     QString m_lastKey;

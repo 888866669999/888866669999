@@ -7,12 +7,18 @@
 #include "../core/models/Contact.h"
 #include "../core/models/Platform.h"
 #include "../automation/MessageSender.h"
+#include "../config/Settings.h"
 #include <QMessageBox>
 #include <QDateTime>
 #include <QThread>
 #include <QDebug>
 #include <QFile>
 #include <QJsonObject>
+#include <QFileDialog>
+#include <QGroupBox>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QLabel>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<Contact>();
@@ -30,6 +36,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_openAIProvider = new OpenAIProvider(this);
     m_aiService->setProvider(m_openAIProvider);
     m_messageSender = new MessageSender(this);
+    m_settingsDialog = nullptr;
     
     loadContacts();
 }
@@ -410,6 +417,11 @@ void MainWindow::setupUI() {
     
     statusLayout->addSpacing(16);
     
+    auto* settingsBtn = new QPushButton("⚙️", this);
+    settingsBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; color: #eaeaea; padding: 4px 8px; font-size: 16px; }");
+    connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettingsClicked);
+    statusLayout->addWidget(settingsBtn);
+    
     auto* statusLabel = new QLabel("✓ 已连接", this);
     statusLabel->setStyleSheet("QLabel { color: #67c23a; font-size: 12px; }");
     statusLayout->addWidget(statusLabel);
@@ -692,4 +704,197 @@ void MainWindow::onPlatformChanged(int index) {
     m_currentMessages.clear();
     m_rightPanel->setVisible(false);
     loadContacts();
+}
+
+void MainWindow::setupSettingsDialog() {
+    // Load settings
+    Settings& s = Settings::instance();
+
+    // Create dialog
+    m_settingsDialog = new QDialog(this);
+    m_settingsDialog->setWindowTitle("设置");
+    m_settingsDialog->setMinimumSize(600, 500);
+    auto* mainLayout = new QVBoxLayout(m_settingsDialog);
+
+    // === WeChat Group ===
+    auto* wechatGroup = new QGroupBox("微信设置", m_settingsDialog);
+    auto* wechatLayout = new QFormLayout(wechatGroup);
+
+    auto* wechatInstallLayout = new QHBoxLayout();
+    m_wechatInstallEdit = new QLineEdit(s.wechatInstallPath(), wechatGroup);
+    m_wechatInstallEdit->setPlaceholderText("微信安装目录");
+    auto* wechatInstallBtn = new QPushButton("浏览", wechatGroup);
+    connect(wechatInstallBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "选择微信安装目录", m_wechatInstallEdit->text());
+        if (!dir.isEmpty()) m_wechatInstallEdit->setText(dir);
+    });
+    auto* wechatCaptureBtn = new QPushButton("捕捉进程", wechatGroup);
+    connect(wechatCaptureBtn, &QPushButton::clicked, this, &MainWindow::onCaptureWeChatProcess);
+    wechatInstallLayout->addWidget(m_wechatInstallEdit);
+    wechatInstallLayout->addWidget(wechatInstallBtn);
+    wechatInstallLayout->addWidget(wechatCaptureBtn);
+    wechatLayout->addRow("安装目录", wechatInstallLayout);
+
+    auto* wechatDataLayout = new QHBoxLayout();
+    m_wechatDataEdit = new QLineEdit(s.wechatDataPath(), wechatGroup);
+    m_wechatDataEdit->setPlaceholderText("微信数据目录（可选）");
+    auto* wechatDataBtn = new QPushButton("浏览", wechatGroup);
+    connect(wechatDataBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "选择微信数据目录", m_wechatDataEdit->text());
+        if (!dir.isEmpty()) m_wechatDataEdit->setText(dir);
+    });
+    wechatDataLayout->addWidget(m_wechatDataEdit);
+    wechatDataLayout->addWidget(wechatDataBtn);
+    wechatLayout->addRow("数据目录", wechatDataLayout);
+
+    // WeChat process list
+    m_wechatProcessList = new QListWidget(wechatGroup);
+    m_wechatProcessList->setMaximumHeight(80);
+    m_wechatProcessList->setStyleSheet("QListWidget { background-color: #2a2a3e; color: #eaeaea; border: none; border-radius: 4px; }");
+    auto* wechatRefreshBtn = new QPushButton("刷新进程列表", wechatGroup);
+    connect(wechatRefreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshProcesses);
+    wechatLayout->addRow("运行中的进程", m_wechatProcessList);
+    wechatLayout->addWidget(wechatRefreshBtn);
+
+    mainLayout->addWidget(wechatGroup);
+
+    // === QQ Group ===
+    auto* qqGroup = new QGroupBox("QQ设置", m_settingsDialog);
+    auto* qqLayout = new QFormLayout(qqGroup);
+
+    auto* qqInstallLayout = new QHBoxLayout();
+    m_qqInstallEdit = new QLineEdit(s.qqInstallPath(), qqGroup);
+    m_qqInstallEdit->setPlaceholderText("QQ安装目录");
+    auto* qqInstallBtn = new QPushButton("浏览", qqGroup);
+    connect(qqInstallBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "选择QQ安装目录", m_qqInstallEdit->text());
+        if (!dir.isEmpty()) m_qqInstallEdit->setText(dir);
+    });
+    auto* qqCaptureBtn = new QPushButton("捕捉进程", qqGroup);
+    connect(qqCaptureBtn, &QPushButton::clicked, this, &MainWindow::onCaptureQQProcess);
+    qqInstallLayout->addWidget(m_qqInstallEdit);
+    qqInstallLayout->addWidget(qqInstallBtn);
+    qqInstallLayout->addWidget(qqCaptureBtn);
+    qqLayout->addRow("安装目录", qqInstallLayout);
+
+    auto* qqDataLayout = new QHBoxLayout();
+    m_qqDataEdit = new QLineEdit(s.qqDataPath(), qqGroup);
+    m_qqDataEdit->setPlaceholderText("QQ数据目录（可选）");
+    auto* qqDataBtn = new QPushButton("浏览", qqGroup);
+    connect(qqDataBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "选择QQ数据目录", m_qqDataEdit->text());
+        if (!dir.isEmpty()) m_qqDataEdit->setText(dir);
+    });
+    qqDataLayout->addWidget(m_qqDataEdit);
+    qqDataLayout->addWidget(qqDataBtn);
+    qqLayout->addRow("数据目录", qqDataLayout);
+
+    // QQ process list
+    m_qqProcessList = new QListWidget(qqGroup);
+    m_qqProcessList->setMaximumHeight(80);
+    m_qqProcessList->setStyleSheet("QListWidget { background-color: #2a2a3e; color: #eaeaea; border: none; border-radius: 4px; }");
+    qqLayout->addRow("运行中的进程", m_qqProcessList);
+
+    mainLayout->addWidget(qqGroup);
+
+    // === AI Config Group ===
+    auto* aiGroup = new QGroupBox("AI 配置", m_settingsDialog);
+    auto* aiLayout = new QFormLayout(aiGroup);
+    auto* apiKeyEdit = new QLineEdit(s.openaiApiKey(), aiGroup);
+    apiKeyEdit->setEchoMode(QLineEdit::Password);
+    apiKeyEdit->setPlaceholderText("sk-...");
+    connect(apiKeyEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        Settings::instance().setOpenaiApiKey(text);
+        m_openAIProvider->setApiKey(text);
+    });
+    aiLayout->addRow("API Key", apiKeyEdit);
+
+    auto* apiUrlEdit = new QLineEdit(s.openaiApiUrl(), aiGroup);
+    apiUrlEdit->setPlaceholderText("https://api.openai.com/v1/chat/completions");
+    connect(apiUrlEdit, &QLineEdit::textChanged, this, [](const QString& text) {
+        Settings::instance().setOpenaiApiUrl(text);
+    });
+    aiLayout->addRow("API URL", apiUrlEdit);
+
+    auto* modelEdit = new QLineEdit(s.openaiModel(), aiGroup);
+    modelEdit->setPlaceholderText("gpt-4o-mini");
+    connect(modelEdit, &QLineEdit::textChanged, this, [](const QString& text) {
+        Settings::instance().setOpenaiModel(text);
+    });
+    aiLayout->addRow("模型", modelEdit);
+
+    mainLayout->addWidget(aiGroup);
+
+    // === Buttons ===
+    auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel | QDialogButtonBox::Reset, m_settingsDialog);
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &MainWindow::onSaveSettings);
+    connect(buttonBox, &QDialogButtonBox::rejected, m_settingsDialog, &QDialog::reject);
+    connect(buttonBox->button(QDialogButtonBox::Reset), &QPushButton::clicked, this, [this]() {
+        Settings::instance().reset();
+        m_wechatInstallEdit->clear();
+        m_wechatDataEdit->clear();
+        m_qqInstallEdit->clear();
+        m_qqDataEdit->clear();
+    });
+    mainLayout->addWidget(buttonBox);
+
+    // Initial process list refresh
+    onRefreshProcesses();
+}
+
+void MainWindow::onSettingsClicked() {
+    if (!m_settingsDialog) {
+        setupSettingsDialog();
+    }
+    m_settingsDialog->exec();
+}
+
+void MainWindow::onRefreshProcesses() {
+    // Refresh WeChat process list
+    if (m_wechatProcessList) {
+        m_wechatProcessList->clear();
+        m_weChatAdapter->refreshProcessList(m_wechatProcessList);
+    }
+    // Refresh QQ process list
+    if (m_qqProcessList) {
+        m_qqProcessList->clear();
+        m_qqAdapter->refreshProcessList(m_qqProcessList);
+    }
+}
+
+void MainWindow::onCaptureWeChatProcess() {
+    // Capture WeChat process and auto-fill install path
+    if (m_weChatAdapter && m_wechatInstallEdit) {
+        QString installPath = m_weChatAdapter->captureProcessInstallPath();
+        if (!installPath.isEmpty()) {
+            m_wechatInstallEdit->setText(installPath);
+            QMessageBox::information(this, "成功", "已自动获取微信安装目录：" + installPath);
+        } else {
+            QMessageBox::warning(this, "失败", "未找到运行中的微信进程，请确保微信已启动");
+        }
+    }
+}
+
+void MainWindow::onCaptureQQProcess() {
+    // Capture QQ process and auto-fill install path
+    if (m_qqAdapter && m_qqInstallEdit) {
+        QString installPath = m_qqAdapter->captureProcessInstallPath();
+        if (!installPath.isEmpty()) {
+            m_qqInstallEdit->setText(installPath);
+            QMessageBox::information(this, "成功", "已自动获取QQ安装目录：" + installPath);
+        } else {
+            QMessageBox::warning(this, "失败", "未找到运行中的QQ进程，请确保QQ已启动");
+        }
+    }
+}
+
+void MainWindow::onSaveSettings() {
+    Settings& s = Settings::instance();
+    s.setWechatInstallPath(m_wechatInstallEdit->text());
+    s.setWechatDataPath(m_wechatDataEdit->text());
+    s.setQqInstallPath(m_qqInstallEdit->text());
+    s.setQqDataPath(m_qqDataEdit->text());
+    s.save();
+    m_settingsDialog->accept();
+    QMessageBox::information(this, "成功", "配置已保存");
 }

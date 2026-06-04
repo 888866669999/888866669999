@@ -1,9 +1,14 @@
 #include "WeChatAdapter.h"
+#include "../config/Settings.h"
 #include <QIcon>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QFileInfo>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
 #include "../core/WeChatDecoder.h"
 
 WeChatAdapter::WeChatAdapter(QObject* parent) 
@@ -33,6 +38,32 @@ bool WeChatAdapter::isAvailable() const {
 
 QStringList WeChatAdapter::findWeChatDataDirs() {
     QStringList dirs;
+    
+    // 优先使用 Settings 中配置的数据目录
+    Settings& settings = Settings::instance();
+    QString customDataPath = settings.wechatDataPath();
+    if (!customDataPath.isEmpty()) {
+        QDir dir(customDataPath);
+        if (dir.exists()) {
+            QDir msgDir(customDataPath + "/Msg");
+            if (msgDir.exists()) {
+                dirs << customDataPath;
+                return dirs;
+            }
+            // 如果配置的是 WeChat Files 根目录，扫描子目录
+            QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QFileInfo& entry : entries) {
+                QString wxidDir = entry.absoluteFilePath();
+                QDir msgDir2(wxidDir + "/Msg");
+                if (msgDir2.exists()) {
+                    dirs << wxidDir;
+                }
+            }
+            if (!dirs.isEmpty()) return dirs;
+        }
+    }
+    
+    // 使用 Settings 中配置的安装目录获取用户名（部分微信版本将数据放在安装目录下）
     QString userName = QString::fromUtf8(qgetenv("USERNAME"));
     QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     
@@ -181,4 +212,85 @@ QPixmap WeChatAdapter::decryptImage(const MediaFile& mediaFile) {
 
 QPixmap WeChatAdapter::decryptImage(const QString& datPath) {
     return m_decoder->decryptImage(datPath);
+}
+
+void WeChatAdapter::refreshProcessList(QListWidget* listWidget) {
+    refreshProcessListInner(listWidget);
+}
+
+QString WeChatAdapter::captureProcessInstallPath() {
+    return captureProcessInstallPathInner();
+}
+
+void WeChatAdapter::refreshProcessListInner(QListWidget* listWidget) {
+    if (!listWidget) return;
+    
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+    
+    PROCESSENTRY32 pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32);
+    
+    if (Process32First(hSnapshot, &pe32)) {
+        do {
+            QString processName = QString::fromWCharArray(pe32.szExeFile);
+            if (processName.compare("WeChat.exe", Qt::CaseInsensitive) == 0 ||
+                processName.compare("Weixin.exe", Qt::CaseInsensitive) == 0) {
+                // 获取进程可执行文件路径
+                QString pidStr = QString::number(pe32.th32ProcessID);
+                HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
+                QString fullPath;
+                if (hProcess) {
+                    wchar_t pathBuf[MAX_PATH];
+                    DWORD pathLen = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProcess, 0, pathBuf, &pathLen)) {
+                        fullPath = QString::fromWCharArray(pathBuf);
+                    }
+                    CloseHandle(hProcess);
+                }
+                
+                QString displayText = QString("%1 (PID: %2)").arg(processName).arg(pidStr);
+                if (!fullPath.isEmpty()) {
+                    displayText += " - " + fullPath;
+                }
+                listWidget->addItem(displayText);
+            }
+        } while (Process32Next(hSnapshot, &pe32));
+    }
+    
+    CloseHandle(hSnapshot);
+}
+
+QString WeChatAdapter::captureProcessInstallPathInner() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return QString();
+    
+    PROCESSENTRY32 pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32);
+    
+    if (Process32First(hSnapshot, &pe32)) {
+        do {
+            QString processName = QString::fromWCharArray(pe32.szExeFile);
+            if (processName.compare("WeChat.exe", Qt::CaseInsensitive) == 0 ||
+                processName.compare("Weixin.exe", Qt::CaseInsensitive) == 0) {
+                
+                HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
+                if (hProcess) {
+                    wchar_t pathBuf[MAX_PATH];
+                    DWORD pathLen = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProcess, 0, pathBuf, &pathLen)) {
+                        QString fullPath = QString::fromWCharArray(pathBuf);
+                        CloseHandle(hProcess);
+                        CloseHandle(hSnapshot);
+                        // 返回安装目录（可执行文件所在目录）
+                        return QFileInfo(fullPath).absolutePath();
+                    }
+                    CloseHandle(hProcess);
+                }
+            }
+        } while (Process32Next(hSnapshot, &pe32));
+    }
+    
+    CloseHandle(hSnapshot);
+    return QString();
 }

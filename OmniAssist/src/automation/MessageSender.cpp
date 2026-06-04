@@ -9,6 +9,7 @@
 #include <QRandomGenerator>
 #include <QDebug>
 #include <QFileInfo>
+#include <QHash>
 #include <windows.h>
 
 MessageSender::MessageSender(QObject* parent) 
@@ -208,8 +209,152 @@ bool MessageSender::sendFile(Platform platform, const QString& contactId, const 
 }
 
 bool MessageSender::sendKeys(HWND hwnd, const QString& keys) {
-    Q_UNUSED(hwnd);
-    Q_UNUSED(keys);
-    qDebug() << "sendKeys not fully implemented";
-    return false;
+    if (!hwnd || keys.isEmpty()) return false;
+
+    if (!SetForegroundWindow(hwnd)) {
+        qWarning() << "Failed to set foreground window for sendKeys";
+        return false;
+    }
+    QThread::msleep(50);
+
+    // 键盘字符到虚拟键码的映射表
+    static const QHash<QChar, WORD> charToVKey = {
+        // 字母
+        {'A', 'A'}, {'B', 'B'}, {'C', 'C'}, {'D', 'D'}, {'E', 'E'},
+        {'F', 'F'}, {'G', 'G'}, {'H', 'H'}, {'I', 'I'}, {'J', 'J'},
+        {'K', 'K'}, {'L', 'L'}, {'M', 'M'}, {'N', 'N'}, {'O', 'O'},
+        {'P', 'P'}, {'Q', 'Q'}, {'R', 'R'}, {'S', 'S'}, {'T', 'T'},
+        {'U', 'U'}, {'V', 'V'}, {'W', 'W'}, {'X', 'X'}, {'Y', 'Y'},
+        {'Z', 'Z'},
+        // 数字
+        {'0', '0'}, {'1', '1'}, {'2', '2'}, {'3', '3'}, {'4', '4'},
+        {'5', '5'}, {'6', '6'}, {'7', '7'}, {'8', '8'}, {'9', '9'},
+        // 特殊字符
+        {' ', VK_SPACE},
+        {'\t', VK_TAB},
+        {'\n', VK_RETURN},
+        {'\r', VK_RETURN},
+        {'.', VK_OEM_PERIOD},
+        {',', VK_OEM_COMMA},
+        {';', VK_OEM_1},
+        {'/', VK_OEM_2},
+        {'\\', VK_OEM_5},
+        {'[', VK_OEM_4},
+        {']', VK_OEM_6},
+        {'\'', VK_OEM_7},
+        {'`', VK_OEM_3},
+        {'-', VK_OEM_MINUS},
+        {'=', VK_OEM_PLUS},
+    };
+
+    // 需要 Shift 修饰符的字符
+    static const QHash<QChar, WORD> shiftChars = {
+        {'!', '1'}, {'@', '2'}, {'#', '3'}, {'$', '4'}, {'%', '5'},
+        {'^', '6'}, {'&', '7'}, {'*', '8'}, {'(', '9'}, {')', '0'},
+        {'_', VK_OEM_MINUS}, {'+', VK_OEM_PLUS},
+        {':', VK_OEM_1}, {'"', VK_OEM_7},
+        {'?', VK_OEM_2}, {'|', VK_OEM_5},
+        {'{', VK_OEM_4}, {'}', VK_OEM_6},
+        {'<', VK_OEM_COMMA}, {'>', VK_OEM_PERIOD},
+        {'~', VK_OEM_3},
+    };
+
+    bool shiftDown = false;
+    auto typeChar = [&](QChar ch) {
+        if (shiftChars.contains(ch)) {
+            WORD baseKey = shiftChars[ch];
+            // 按下 Shift
+            keybd_event(VK_SHIFT, 0, 0, 0);
+            QThread::msleep(10);
+            // 按下基础键
+            keybd_event(baseKey, 0, 0, 0);
+            QThread::msleep(10);
+            keybd_event(baseKey, 0, KEYEVENTF_KEYUP, 0);
+            QThread::msleep(10);
+            // 释放 Shift
+            keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+            QThread::msleep(10);
+        } else if (charToVKey.contains(ch)) {
+            WORD vk = charToVKey[ch];
+            keybd_event(vk, 0, 0, 0);
+            QThread::msleep(10);
+            keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+            QThread::msleep(10);
+        }
+    };
+
+    for (int i = 0; i < keys.size(); i++) {
+        QChar ch = keys[i];
+        
+        // 特殊组合键处理
+        if (ch == '{') {
+            // 查找闭合括号
+            int closeIdx = keys.indexOf('}', i);
+            if (closeIdx > i) {
+                QString combo = keys.mid(i + 1, closeIdx - i - 1).toUpper();
+                if (combo == "ENTER" || combo == "RETURN") {
+                    pressKey(VK_RETURN);
+                } else if (combo == "TAB") {
+                    pressKey(VK_TAB);
+                } else if (combo == "ESC") {
+                    pressKey(VK_ESCAPE);
+                } else if (combo == "DEL" || combo == "DELETE") {
+                    pressKey(VK_DELETE);
+                } else if (combo == "BACK" || combo == "BACKSPACE") {
+                    pressKey(VK_BACK);
+                } else if (combo == "CTRL+C") {
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('C', 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('C', 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                } else if (combo == "CTRL+V") {
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('V', 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('V', 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                } else if (combo == "CTRL+A") {
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('A', 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('A', 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                } else if (combo == "CTRL+X") {
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('X', 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('X', 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                } else if (combo == "CTRL+Z") {
+                    keybd_event(VK_CONTROL, 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('Z', 0, 0, 0);
+                    QThread::msleep(10);
+                    keybd_event('Z', 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+                    QThread::msleep(10);
+                }
+                i = closeIdx;
+                continue;
+            }
+        }
+        
+        typeChar(ch);
+    }
+
+    return true;
 }

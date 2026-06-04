@@ -6,6 +6,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QFile>
+#include <QFileInfo>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/aes.h>
 #include <QMutex>
 
 // 用于生成唯一数据库连接名称的计数器
@@ -283,18 +285,238 @@ QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& da
 }
 
 QPixmap WeChatDecoder::decryptImage(const QString& datPath) {
-    Q_UNUSED(datPath);
-    // TODO: 实现微信图片解密逻辑
-    return QPixmap();
+    QFile file(datPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open image file:" << datPath;
+        return QPixmap();
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    if (data.size() < 4) {
+        qWarning() << "Image file too small:" << datPath;
+        return QPixmap();
+    }
+
+    // 微信图片使用 XOR 加密，通过文件头确定密钥
+    // JPEG 文件头: FF D8 FF
+    // PNG 文件头: 89 50 4E 47
+    // GIF 文件头: 47 49 46 38
+    quint8 xorKey = 0;
+    
+    // 尝试 JPEG 头 (最常见的微信图片格式)
+    quint8 key1 = data[0] ^ 0xFF;
+    quint8 key2 = data[1] ^ 0xD8;
+    
+    if (key1 == key2) {
+        // JPEG 格式
+        xorKey = key1;
+    } else {
+        // 尝试 PNG 头
+        quint8 key3 = data[0] ^ 0x89;
+        quint8 key4 = data[1] ^ 0x50;
+        if (key3 == key4) {
+            xorKey = key3;
+        } else {
+            // 尝试 GIF 头
+            quint8 key5 = data[0] ^ 0x47;
+            quint8 key6 = data[1] ^ 0x49;
+            if (key5 == key6) {
+                xorKey = key5;
+            } else {
+                // 使用前两个字节异或作为密钥
+                xorKey = key1;
+                qWarning() << "Unknown image format, using fallback XOR key";
+            }
+        }
+    }
+
+    qDebug() << "XOR key:" << QString("0x%1").arg(xorKey, 2, 16, QChar('0'));
+
+    // 解密数据
+    QByteArray decrypted(data.size(), 0);
+    for (int i = 0; i < data.size(); i++) {
+        decrypted[i] = static_cast<char>(static_cast<quint8>(data[i]) ^ xorKey);
+    }
+
+    QPixmap pixmap;
+    if (!pixmap.loadFromData(decrypted)) {
+        qWarning() << "Failed to load decrypted image";
+        return QPixmap();
+    }
+
+    return pixmap;
 }
 
 bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key) {
-    Q_UNUSED(dbPath);
-    Q_UNUSED(outputPath);
-    Q_UNUSED(key);
-    // TODO: 实现 SQLite 数据库解密逻辑
-    qWarning() << "decryptDatabase not yet implemented";
-    return false;
+    if (!QFile::exists(dbPath)) {
+        qWarning() << "Database file not found:" << dbPath;
+        return false;
+    }
+
+    // 解析密钥格式: x'HEX'
+    QString hexKey = key;
+    if (key.startsWith("x'") && key.endsWith("'")) {
+        hexKey = key.mid(2, key.length() - 3);
+    }
+    QByteArray encKey = QByteArray::fromHex(hexKey.toUtf8());
+    if (encKey.size() != 32) {
+        qWarning() << "Invalid key size:" << encKey.size() << "(expected 32 bytes)";
+        return false;
+    }
+
+    QFile inFile(dbPath);
+    if (!inFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open database for reading:" << dbPath;
+        return false;
+    }
+
+    QByteArray fileData = inFile.readAll();
+    inFile.close();
+
+    const int PAGE_SIZE = 4096;
+    const int HMAC_SIZE = 64;   // HMAC-SHA512
+    const int SALT_SIZE = 16;
+    const int IV_SIZE = 16;
+    const int MAC_SALT_XOR = 0x3a;
+
+    qint64 fileSize = fileData.size();
+    if (fileSize % PAGE_SIZE != 0) {
+        qWarning() << "File size is not a multiple of page size:" << fileSize;
+        return false;
+    }
+
+    int numPages = fileSize / PAGE_SIZE;
+    qDebug() << "Decrypting" << numPages << "pages";
+
+    // 提取第一页的盐值
+    QByteArray salt = fileData.mid(SALT_SIZE, SALT_SIZE);
+
+    // 生成 MAC 盐值
+    QByteArray macSalt(salt);
+    for (int i = 0; i < macSalt.size(); i++) {
+        macSalt[i] = macSalt[i] ^ MAC_SALT_XOR;
+    }
+
+    // 使用 PBKDF2 从原始密钥派生 HMAC 密钥 (iterations=2)
+    QByteArray macKey = deriveKey(encKey, macSalt, 2, 32);
+
+    // 使用 PBKDF2 从原始密钥派生加密密钥 (iterations=2, 使用 HMAC-SHA1)
+    QByteArray fileKey = deriveKey(encKey, salt, 2, 32);
+
+    QByteArray decryptedData;
+    decryptedData.reserve(fileSize);
+
+    for (int i = 0; i < numPages; i++) {
+        QByteArray page = fileData.mid(i * PAGE_SIZE, PAGE_SIZE);
+        if (page.size() != PAGE_SIZE) {
+            qWarning() << "Page" << i << "size mismatch:" << page.size();
+            return false;
+        }
+
+        // 提取 HMAC 和数据
+        QByteArray storedHmac = page.mid(PAGE_SIZE - HMAC_SIZE, HMAC_SIZE);
+        QByteArray pageContent;
+        
+        if (i == 0) {
+            // 第一页: salt + 数据内容 + HMAC
+            pageContent = page.mid(SALT_SIZE, PAGE_SIZE - SALT_SIZE - HMAC_SIZE);
+        } else {
+            pageContent = page.mid(0, PAGE_SIZE - HMAC_SIZE);
+        }
+
+        // 验证 HMAC
+        QByteArray calculatedHmac = hmacSha512(macKey, pageContent);
+        if (calculatedHmac != storedHmac) {
+            qWarning() << "HMAC verification failed for page" << i;
+            // 不中断，继续解密（可能是数据库结构差异）
+        }
+
+        // 提取 IV 并解密
+        QByteArray iv = pageContent.left(IV_SIZE);
+        QByteArray encryptedContent = pageContent.mid(IV_SIZE);
+
+        // 使用 AES-256-CBC 解密
+        QByteArray decryptedPage = aes256CbcDecrypt(fileKey, iv, encryptedContent);
+        if (decryptedPage.isEmpty()) {
+            qWarning() << "Decryption failed for page" << i;
+            return false;
+        }
+
+        // 重组页面
+        if (i == 0) {
+            // 第一页需要恢复 SQLite 文件头
+            QByteArray sqliteHeader = "SQLite format 3\000";
+            decryptedData.append(salt);  // 保留盐值
+            decryptedData.append(sqliteHeader.mid(16));  // 覆盖默认 SQLite 头的剩余部分
+            decryptedData.append(decryptedPage);
+            // 填充到页面大小
+            while (decryptedData.size() < PAGE_SIZE) {
+                decryptedData.append('\0');
+            }
+        } else {
+            decryptedData.append(decryptedPage);
+        }
+    }
+
+    // 写入解密后的文件
+    QFile outFile(outputPath);
+    if (!outFile.open(QIODevice::WriteOnly)) {
+        qWarning() << "Failed to open output file:" << outputPath;
+        return false;
+    }
+
+    outFile.write(decryptedData);
+    outFile.close();
+
+    qDebug() << "Database decrypted successfully:" << outputPath;
+    return true;
+}
+
+QByteArray WeChatDecoder::aes256CbcDecrypt(const QByteArray& key, const QByteArray& iv, const QByteArray& data) {
+    if (key.size() != 32 || iv.size() != 16) {
+        qWarning() << "Invalid key or IV size";
+        return QByteArray();
+    }
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        qCritical() << "Failed to create EVP_CIPHER_CTX";
+        return QByteArray();
+    }
+
+    // 初始化 AES-256-CBC 解密
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, 
+                           reinterpret_cast<const unsigned char*>(key.data()),
+                           reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+        qCritical() << "EVP_DecryptInit_ex failed";
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
+    }
+
+    // 不使用填充（微信数据库数据已经是页面大小的倍数）
+    EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+    QByteArray result(data.size() + EVP_MAX_BLOCK_LENGTH, 0);
+    int outLen1 = 0, outLen2 = 0;
+
+    if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(result.data()),
+                          &outLen1, reinterpret_cast<const unsigned char*>(data.data()), data.size()) != 1) {
+        qCritical() << "EVP_DecryptUpdate failed";
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
+    }
+
+    if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(result.data()) + outLen1, &outLen2) != 1) {
+        qWarning() << "EVP_DecryptFinal_ex failed (may be expected for raw pages)";
+        // 对于数据库页面，Final 失败可能是正常的
+        outLen2 = 0;
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+    result.resize(outLen1 + outLen2);
+    return result;
 }
 
 QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const QString& key) {

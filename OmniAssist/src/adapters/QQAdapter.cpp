@@ -1,9 +1,14 @@
 #include "QQAdapter.h"
+#include "../config/Settings.h"
 #include <QIcon>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QFileInfo>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
 #include "../core/QQDecoder.h"
 
 QQAdapter::QQAdapter(QObject* parent) 
@@ -33,6 +38,41 @@ bool QQAdapter::isAvailable() const {
 
 QStringList QQAdapter::findQQDataDirs() {
     QStringList dirs;
+    
+    // 优先使用 Settings 中配置的数据目录
+    Settings& settings = Settings::instance();
+    QString customDataPath = settings.qqDataPath();
+    if (!customDataPath.isEmpty()) {
+        QDir dir(customDataPath);
+        if (dir.exists()) {
+            QDir msgDir(customDataPath + "/Msg2.0");
+            if (msgDir.exists()) {
+                dirs << customDataPath;
+                return dirs;
+            }
+            QDir msgDirOld(customDataPath + "/Msg");
+            if (msgDirOld.exists()) {
+                dirs << customDataPath;
+                return dirs;
+            }
+            // 如果配置的是 Tencent Files 根目录，扫描子目录
+            QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QFileInfo& entry : entries) {
+                QString qqDir = entry.absoluteFilePath();
+                QDir msgDir2(qqDir + "/Msg2.0");
+                if (msgDir2.exists()) {
+                    dirs << qqDir;
+                } else {
+                    QDir msgDirOld2(qqDir + "/Msg");
+                    if (msgDirOld2.exists()) {
+                        dirs << qqDir;
+                    }
+                }
+            }
+            if (!dirs.isEmpty()) return dirs;
+        }
+    }
+    
     QString userName = QString::fromUtf8(qgetenv("USERNAME"));
     
     QString tencentFilesPath = "C:/Users/" + userName + "/Documents/Tencent Files";
@@ -209,4 +249,85 @@ QPixmap QQAdapter::decryptImage(const MediaFile& mediaFile) {
 QPixmap QQAdapter::decryptImage(const QString& datPath) {
     Q_UNUSED(datPath);
     return QPixmap();
+}
+
+void QQAdapter::refreshProcessList(QListWidget* listWidget) {
+    refreshProcessListInner(listWidget);
+}
+
+QString QQAdapter::captureProcessInstallPath() {
+    return captureProcessInstallPathInner();
+}
+
+void QQAdapter::refreshProcessListInner(QListWidget* listWidget) {
+    if (!listWidget) return;
+    
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return;
+    
+    PROCESSENTRY32 pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32);
+    
+    if (Process32First(hSnapshot, &pe32)) {
+        do {
+            QString processName = QString::fromWCharArray(pe32.szExeFile);
+            // 支持旧版 QQ.exe 和新版 QQNT.exe
+            if (processName.compare("QQ.exe", Qt::CaseInsensitive) == 0 ||
+                processName.compare("QQNT.exe", Qt::CaseInsensitive) == 0) {
+                QString pidStr = QString::number(pe32.th32ProcessID);
+                HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
+                QString fullPath;
+                if (hProcess) {
+                    wchar_t pathBuf[MAX_PATH];
+                    DWORD pathLen = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProcess, 0, pathBuf, &pathLen)) {
+                        fullPath = QString::fromWCharArray(pathBuf);
+                    }
+                    CloseHandle(hProcess);
+                }
+                
+                QString displayText = QString("%1 (PID: %2)").arg(processName).arg(pidStr);
+                if (!fullPath.isEmpty()) {
+                    displayText += " - " + fullPath;
+                }
+                listWidget->addItem(displayText);
+            }
+        } while (Process32Next(hSnapshot, &pe32));
+    }
+    
+    CloseHandle(hSnapshot);
+}
+
+QString QQAdapter::captureProcessInstallPathInner() {
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE) return QString();
+    
+    PROCESSENTRY32 pe32;
+    pe32.dwSize = sizeof(PROCESSENTRY32);
+    
+    if (Process32First(hSnapshot, &pe32)) {
+        do {
+            QString processName = QString::fromWCharArray(pe32.szExeFile);
+            // 支持旧版 QQ.exe 和新版 QQNT.exe
+            if (processName.compare("QQ.exe", Qt::CaseInsensitive) == 0 ||
+                processName.compare("QQNT.exe", Qt::CaseInsensitive) == 0) {
+                
+                HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
+                if (hProcess) {
+                    wchar_t pathBuf[MAX_PATH];
+                    DWORD pathLen = MAX_PATH;
+                    if (QueryFullProcessImageNameW(hProcess, 0, pathBuf, &pathLen)) {
+                        QString fullPath = QString::fromWCharArray(pathBuf);
+                        CloseHandle(hProcess);
+                        CloseHandle(hSnapshot);
+                        return QFileInfo(fullPath).absolutePath();
+                    }
+                    CloseHandle(hProcess);
+                }
+            }
+        } while (Process32Next(hSnapshot, &pe32));
+    }
+    
+    CloseHandle(hSnapshot);
+    return QString();
 }

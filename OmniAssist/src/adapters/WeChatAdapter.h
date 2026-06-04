@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QIcon>
+#include <QListWidget>
 #include "IPlatformAdapter.h"
 #include "../core/WeChatDecoder.h"
 
@@ -36,8 +37,15 @@ signals:
     void newMessageReceived(const ChatMessage& msg);
     void errorOccurred(const QString& error);
 
+public:
+    // 进程捕捉和列表刷新（供 MainWindow 调用）
+    void refreshProcessList(QListWidget* listWidget);
+    QString captureProcessInstallPath();
+
 private:
     QStringList findWeChatDataDirs();
+    void refreshProcessListInner(QListWidget* listWidget);
+    QString captureProcessInstallPathInner();
 
     WeChatDecoder* m_decoder;
     QStringList m_keys;

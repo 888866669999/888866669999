@@ -21,6 +21,7 @@ set(SOURCES
     src/ai/providers/OpenAIProvider.cpp
     src/automation/WindowFinder.cpp
     src/automation/MessageSender.cpp
+    src/config/Settings.cpp
 )
 
 set(HEADERS
@@ -40,6 +41,7 @@ set(HEADERS
     src/ai/providers/OpenAIProvider.h
     src/automation/WindowFinder.h
     src/automation/MessageSender.h
+    src/config/Settings.h
 )
 
 set(RESOURCES

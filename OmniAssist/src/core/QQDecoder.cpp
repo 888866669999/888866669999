@@ -6,6 +6,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QFile>
+#include <QFileInfo>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
@@ -13,6 +14,8 @@
 #include <set>
 #include <algorithm>
 #include <QMutex>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
 
 // 用于生成唯一数据库连接名称的计数器
 static QMutex dbMutex;
@@ -100,7 +103,9 @@ QStringList QQDecoder::findQQProcesses() {
     if (Process32First(hSnapshot, &pe32)) {
         do {
             QString processName = QString::fromWCharArray(pe32.szExeFile);
-            if (processName.compare("QQ.exe", Qt::CaseInsensitive) == 0) {
+            // 支持旧版 QQ.exe 和新版 QQNT.exe
+            if (processName.compare("QQ.exe", Qt::CaseInsensitive) == 0 ||
+                processName.compare("QQNT.exe", Qt::CaseInsensitive) == 0) {
                 processes << QString::number(pe32.th32ProcessID);
             }
         } while (Process32Next(hSnapshot, &pe32));
@@ -177,6 +182,174 @@ QByteArray QQDecoder::readProcessMemory(void* processHandle, void* address, size
     return QByteArray();
 }
 
+bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key) {
+    if (!QFile::exists(dbPath)) {
+        qWarning() << "Database file not found:" << dbPath;
+        return false;
+    }
+
+    // 解析密钥格式: x'HEX'
+    QString hexKey = key;
+    if (key.startsWith("x'") && key.endsWith("'")) {
+        hexKey = key.mid(2, key.length() - 3);
+    }
+    QByteArray encKey = QByteArray::fromHex(hexKey.toUtf8());
+    if (encKey.size() != 32) {
+        qWarning() << "Invalid key size:" << encKey.size() << "(expected 32 bytes)";
+        return false;
+    }
+
+    QFile inFile(dbPath);
+    if (!inFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open database for reading:" << dbPath;
+        return false;
+    }
+
+    QByteArray fileData = inFile.readAll();
+    inFile.close();
+
+    const int PAGE_SIZE = 4096;
+    const int HMAC_SIZE = 20;   // QQ 使用 HMAC-SHA1 (20 字节)
+    const int SALT_SIZE = 16;
+    const int IV_SIZE = 16;
+    const int MAC_SALT_XOR = 0x3a;
+
+    qint64 fileSize = fileData.size();
+    if (fileSize % PAGE_SIZE != 0) {
+        qWarning() << "File size is not a multiple of page size:" << fileSize;
+        return false;
+    }
+
+    int numPages = fileSize / PAGE_SIZE;
+    qDebug() << "Decrypting QQ database:" << numPages << "pages";
+
+    // 提取第一页的盐值
+    QByteArray salt = fileData.mid(SALT_SIZE, SALT_SIZE);
+
+    // 生成 MAC 盐值
+    QByteArray macSalt(salt);
+    for (int i = 0; i < macSalt.size(); i++) {
+        macSalt[i] = macSalt[i] ^ MAC_SALT_XOR;
+    }
+
+    // 使用 PBKDF2 从原始密钥派生 HMAC 密钥 (iterations=2)
+    // QQ 使用 HMAC-SHA1
+    unsigned char hmacKeyBuf[32];
+    PKCS5_PBKDF2_HMAC(encKey.data(), encKey.size(),
+                       reinterpret_cast<const unsigned char*>(macSalt.data()), macSalt.size(),
+                       2, EVP_sha1(),
+                       32, hmacKeyBuf);
+    QByteArray macKey(reinterpret_cast<char*>(hmacKeyBuf), 32);
+
+    // 使用 PBKDF2 从原始密钥派生加密密钥 (iterations=2)
+    unsigned char fileKeyBuf[32];
+    PKCS5_PBKDF2_HMAC(encKey.data(), encKey.size(),
+                       reinterpret_cast<const unsigned char*>(salt.data()), salt.size(),
+                       2, EVP_sha1(),
+                       32, fileKeyBuf);
+    QByteArray fileKey(reinterpret_cast<char*>(fileKeyBuf), 32);
+
+    QByteArray decryptedData;
+    decryptedData.reserve(fileSize);
+
+    for (int i = 0; i < numPages; i++) {
+        QByteArray page = fileData.mid(i * PAGE_SIZE, PAGE_SIZE);
+        if (page.size() != PAGE_SIZE) {
+            qWarning() << "Page" << i << "size mismatch:" << page.size();
+            return false;
+        }
+
+        // 提取 HMAC 和数据
+        QByteArray storedHmac = page.mid(PAGE_SIZE - HMAC_SIZE, HMAC_SIZE);
+        QByteArray pageContent;
+        
+        if (i == 0) {
+            // 第一页: salt + 数据内容 + HMAC
+            pageContent = page.mid(SALT_SIZE, PAGE_SIZE - SALT_SIZE - HMAC_SIZE);
+        } else {
+            pageContent = page.mid(0, PAGE_SIZE - HMAC_SIZE);
+        }
+
+        // 验证 HMAC-SHA1
+        unsigned char hmacDigest[EVP_MAX_MD_SIZE];
+        unsigned int hmacLen = 0;
+        HMAC(EVP_sha1(), macKey.data(), macKey.size(),
+             reinterpret_cast<const unsigned char*>(pageContent.data()), pageContent.size(),
+             hmacDigest, &hmacLen);
+        QByteArray calculatedHmac(reinterpret_cast<char*>(hmacDigest), hmacLen);
+        
+        if (calculatedHmac != storedHmac) {
+            qWarning() << "HMAC verification failed for page" << i;
+        }
+
+        // 提取 IV 并解密
+        QByteArray iv = pageContent.left(IV_SIZE);
+        QByteArray encryptedContent = pageContent.mid(IV_SIZE);
+
+        // 使用 AES-256-CBC 解密
+        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+        if (!ctx) {
+            qCritical() << "Failed to create EVP_CIPHER_CTX";
+            return false;
+        }
+
+        if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr,
+                               reinterpret_cast<const unsigned char*>(fileKey.data()),
+                               reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+            qCritical() << "EVP_DecryptInit_ex failed";
+            EVP_CIPHER_CTX_free(ctx);
+            return false;
+        }
+
+        EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+        QByteArray decryptedPage(encryptedContent.size() + EVP_MAX_BLOCK_LENGTH, 0);
+        int outLen1 = 0, outLen2 = 0;
+
+        if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(decryptedPage.data()),
+                              &outLen1, reinterpret_cast<const unsigned char*>(encryptedContent.data()), encryptedContent.size()) != 1) {
+            qCritical() << "EVP_DecryptUpdate failed for page" << i;
+            EVP_CIPHER_CTX_free(ctx);
+            return false;
+        }
+
+        if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(decryptedPage.data()) + outLen1, &outLen2) != 1) {
+            // 对于数据库页面，Final 失败可能是正常的
+            outLen2 = 0;
+        }
+
+        EVP_CIPHER_CTX_free(ctx);
+        decryptedPage.resize(outLen1 + outLen2);
+
+        // 重组页面
+        if (i == 0) {
+            // 第一页需要恢复 SQLite 文件头
+            QByteArray sqliteHeader = "SQLite format 3\000";
+            decryptedData.append(salt);
+            decryptedData.append(sqliteHeader.mid(16));
+            decryptedData.append(decryptedPage);
+            while (decryptedData.size() < PAGE_SIZE) {
+                decryptedData.append('\0');
+            }
+        } else {
+            decryptedData.append(decryptedPage);
+        }
+    }
+
+    // 写入解密后的文件
+    QFile outFile(outputPath);
+    if (!outFile.open(QIODevice::WriteOnly)) {
+        qWarning() << "Failed to open output file:" << outputPath;
+        return false;
+    }
+
+    outFile.write(decryptedData);
+    outFile.close();
+
+    qDebug() << "QQ database decrypted successfully:" << outputPath;
+    return true;
+}
+
 QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString& key) {
     QList<QQContact> contacts;
 
@@ -190,9 +363,18 @@ QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString&
         return contacts;
     }
 
+    // 如果有密钥，先尝试解密数据库
+    QString dbToUse = msgDbPath;
+    if (!key.isEmpty()) {
+        QString decryptedPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/omniassist_qq_decrypted.db";
+        if (decryptDatabase(msgDbPath, decryptedPath, key)) {
+            dbToUse = decryptedPath;
+        }
+    }
+
     QString connectionName = generateUniqueConnectionName("qq_contacts");
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    db.setDatabaseName(msgDbPath);
+    db.setDatabaseName(dbToUse);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
@@ -269,9 +451,18 @@ QList<QQMessage> QQDecoder::getChatHistory(const QString& dbPath, const QString&
         return messages;
     }
 
+    // 如果有密钥，先尝试解密数据库
+    QString dbToUse = msgDbPath;
+    if (!key.isEmpty()) {
+        QString decryptedPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/omniassist_qq_messages_decrypted.db";
+        if (decryptDatabase(msgDbPath, decryptedPath, key)) {
+            dbToUse = decryptedPath;
+        }
+    }
+
     QString connectionName = generateUniqueConnectionName("qq_messages");
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    db.setDatabaseName(msgDbPath);
+    db.setDatabaseName(dbToUse);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
