@@ -8,6 +8,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network Sql)
+find_package(OpenSSL REQUIRED)
 
 set(SOURCES
     src/main.cpp
@@ -56,6 +57,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::Sql
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 if(WIN32)

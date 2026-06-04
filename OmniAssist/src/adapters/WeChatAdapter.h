@@ -2,6 +2,7 @@
 #define WECHATADAPTER_H
 
 #include <QObject>
+#include <QIcon>
 #include "IPlatformAdapter.h"
 #include "../core/WeChatDecoder.h"
 
@@ -27,16 +28,20 @@ public:
     void stopMonitoring() override;
 
     bool supportsRichMedia() const override { return true; }
+    QPixmap decryptImage(const QString& datPath);
 
 signals:
     void newMessageReceived(const ChatMessage& msg);
     void errorOccurred(const QString& error);
 
 private:
+    QStringList findWeChatDataDirs();
+
     WeChatDecoder* m_decoder;
     QStringList m_keys;
     QString m_dataDir;
     bool m_initialized;
+    QIcon m_platformIcon;
 };
 
 #endif

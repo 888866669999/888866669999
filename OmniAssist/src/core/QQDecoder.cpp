@@ -10,6 +10,8 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <regex>
+#include <set>
+#include <algorithm>
 
 QQDecoder::QQDecoder() : m_foundKeys(nullptr) {
     QSqlDatabase::removeDatabase("qq_connection");

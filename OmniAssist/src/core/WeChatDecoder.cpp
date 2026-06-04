@@ -10,6 +10,10 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <regex>
+#include <set>
+#include <algorithm>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
 
 WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
     QSqlDatabase::removeDatabase("wechat_connection");

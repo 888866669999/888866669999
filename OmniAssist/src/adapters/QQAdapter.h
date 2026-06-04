@@ -2,6 +2,7 @@
 #define QQADAPTER_H
 
 #include <QObject>
+#include <QIcon>
 #include "IPlatformAdapter.h"
 #include "../core/QQDecoder.h"
 
@@ -27,16 +28,24 @@ public:
     void stopMonitoring() override;
 
     bool supportsRichMedia() const override { return true; }
+    QPixmap decryptImage(const QString& datPath);
+    
+    void setUseAPI(bool useAPI);
+    bool connectToNapCat(const QString& host, int port);
 
 signals:
     void newMessageReceived(const ChatMessage& msg);
     void errorOccurred(const QString& error);
 
 private:
+    QStringList findQQDataDirs();
+
     QQDecoder* m_decoder;
     QStringList m_keys;
     QString m_dataDir;
     bool m_initialized;
+    bool m_useAPI;
+    QIcon m_platformIcon;
 };
 
 #endif

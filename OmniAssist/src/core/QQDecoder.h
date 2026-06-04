@@ -15,6 +15,7 @@ struct QQContact {
     QString avatarPath;
     QDateTime createTime;
     QVariant extra;
+    bool isGroup = false;
 };
 
 struct QQMessage {
@@ -40,6 +41,10 @@ public:
     QList<QQContact> getAllContacts(const QString& dbPath, const QString& key);
     QList<QQMessage> getChatHistory(const QString& dbPath, const QString& key, 
                                     const QString& talkerId, int limit = 100);
+    
+    bool connectToNapCat(const QString& host, int port);
+    QList<QQContact> getContactsFromAPI();
+    QList<QQMessage> getMessagesFromAPI(const QString& talkerId, int limit);
 
 private:
     QStringList* m_foundKeys;

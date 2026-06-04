@@ -10,6 +10,7 @@
 #include <QThread>
 #include <QDebug>
 #include <QFile>
+#include <QJsonObject>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUI();
@@ -27,8 +28,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
-    delete m_weChatAdapter;
-    delete m_qqAdapter;
+    // m_weChatAdapter 和 m_qqAdapter 有 this 作为父对象，Qt 会自动处理析构
+    // 只需要手动删除没有父对象的 m_aiService
     delete m_aiService;
 }
 
