@@ -4,6 +4,7 @@
 #include <QString>
 #include <QJsonObject>
 #include <QList>
+#include <memory>
 #include "providers/IAIServiceProvider.h"
 #include "../core/models/ChatMessage.h"
 
@@ -19,8 +20,8 @@ public:
     QString analyzeContactPersona(const QList<ChatMessage>& history);
 
 private:
-    IAIServiceProvider* m_provider;
-    bool m_ownedProvider;  // 标记是否拥有 provider 的所有权
+    IAIServiceProvider* m_provider;          // 不拥有所有权，由外部管理
+    std::unique_ptr<IAIServiceProvider> m_ownedProvider;  // 默认 provider 的所有权
 };
 
 #endif

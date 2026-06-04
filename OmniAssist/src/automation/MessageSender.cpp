@@ -257,8 +257,6 @@ bool MessageSender::sendKeys(HWND hwnd, const QString& keys) {
         {'~', VK_OEM_3},
     };
 
-    bool shiftDown = false;
-    Q_UNUSED(shiftDown);
     auto typeChar = [&](QChar ch) {
         if (shiftChars.contains(ch)) {
             WORD baseKey = shiftChars[ch];
