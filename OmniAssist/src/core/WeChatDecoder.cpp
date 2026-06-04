@@ -132,7 +132,9 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
             QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
             
             if (!memory.isEmpty()) {
-                std::regex hex_re(R"(x'([0-9a-fA-F]{64,192})')");
+                // 精确匹配 SQLite 密钥格式: x'64个十六进制字符'（64 字节 = 128 个十六进制字符）
+                // 微信加密密钥长度通常为 64 字节 (128 hex chars)
+                std::regex hex_re(R"(x'([0-9a-fA-F]{128})')", std::regex::icase);
                 std::string data_str(memory.constData(), memory.size());
                 std::smatch match;
                 
@@ -308,8 +310,10 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(contactDbPath);
 
+    // 注意：微信 MSG.db 是 SQLCipher 加密数据库，需要先调用 decryptDatabase() 解密
+    // 如果直接打开会失败并返回空列表。建议先实现 decryptDatabase 函数。
     if (!db.open()) {
-        qWarning() << "Failed to open database:" << db.lastError().text();
+        qWarning() << "Failed to open database (may be encrypted with SQLCipher):" << db.lastError().text();
         QSqlDatabase::removeDatabase(connectionName);
         return contacts;
     }

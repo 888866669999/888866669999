@@ -14,7 +14,7 @@ public:
     explicit MessageSender(QObject* parent = nullptr);
     ~MessageSender();
 
-    bool sendText(Platform platform, const QString& contactId, const QString& text);
+    bool sendText(Platform platform, const QString& contactId, const QString& contactName, const QString& text);
     bool sendFile(Platform platform, const QString& contactId, const QString& filePath);
 
 private:

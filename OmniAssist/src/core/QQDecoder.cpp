@@ -131,7 +131,9 @@ bool QQDecoder::scanProcessMemory(void* processHandle) {
             QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
             
             if (!memory.isEmpty()) {
-                std::regex hex_re(R"(x'([0-9a-fA-F]{64,192})')");
+                // 精确匹配 SQLite 密钥格式: x'128个十六进制字符'（64 字节密钥）
+                // QQ 加密密钥长度通常为 64 字节 (128 hex chars)
+                std::regex hex_re(R"(x'([0-9a-fA-F]{128})')", std::regex::icase);
                 std::string data_str(memory.constData(), memory.size());
                 std::smatch match;
                 
@@ -215,9 +217,8 @@ QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString&
         QQContact contact;
         contact.id = query.value(0).toString();
         contact.name = query.value(1).toString();
-        if (query.record().count() > 2) {
-            contact.remark = query.value(2).toString();
-        }
+        contact.remark = query.value(2).toString();
+        contact.avatarPath = query.record().count() > 3 ? query.value(3).toString() : QString();
         
         if (contact.remark.isEmpty()) {
             contact.remark = contact.name;

@@ -567,7 +567,9 @@ void MainWindow::onSendClicked() {
     m_inputEdit->clear();
     
     Platform platform = (m_platformTabs->currentIndex() == 0) ? Platform::WeChat : Platform::QQ;
-    bool sent = m_messageSender->sendText(platform, m_currentContact.id, text);
+    // 使用联系人的备注名（如果有）作为窗口标题，否则使用昵称
+    QString windowName = m_currentContact.remark.isEmpty() ? m_currentContact.name : m_currentContact.remark;
+    bool sent = m_messageSender->sendText(platform, m_currentContact.id, windowName, text);
     
     QString timeStr = QDateTime::currentDateTime().toString("HH:mm");
     

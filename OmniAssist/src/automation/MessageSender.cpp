@@ -146,30 +146,19 @@ bool MessageSender::sendFileViaClipboard(HWND hwnd, const QString& filePath) {
     return true;
 }
 
-bool MessageSender::sendText(Platform platform, const QString& contactId, const QString& text) {
-    qDebug() << "Sending text to" << contactId << "(platform:" << static_cast<int>(platform) << ")";
+bool MessageSender::sendText(Platform platform, const QString& contactId, const QString& contactName, const QString& text) {
+    qDebug() << "Sending text to" << contactId << "(" << contactName << ") platform:" << static_cast<int>(platform);
 
     addRandomDelay();
     simulateMouseMovement();
 
-    QString windowTitle;
-    switch (platform) {
-        case Platform::WeChat:
-            windowTitle = contactId;
-            break;
-        case Platform::QQ:
-            windowTitle = contactId;
-            break;
-        case Platform::DingTalk:
-            windowTitle = contactId;
-            break;
-        default:
-            break;
-    }
+    // 使用联系人的显示名称（昵称）作为窗口标题进行搜索，
+    // 而非内部 ID（如 wxid_xxx），因为聊天窗口标题是昵称格式
+    QString windowTitle = contactName.isEmpty() ? contactId : contactName;
 
     QList<HWND> windows = m_windowFinder->findAllWindows(windowTitle);
     if (windows.isEmpty()) {
-        qWarning() << "No window found for" << contactId;
+        qWarning() << "No window found for" << windowTitle;
         return false;
     }
 
