@@ -42,6 +42,7 @@ private:
     QString m_dataDir;
     bool m_initialized;
     QIcon m_platformIcon;
+    bool m_decoderInitialized;  // 防止重复初始化
 };
 
 #endif

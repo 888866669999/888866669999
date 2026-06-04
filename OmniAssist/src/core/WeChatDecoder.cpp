@@ -210,7 +210,8 @@ bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
     QByteArray p1HmacData = page1.mid(16, 4096 - 80);
     QByteArray p1StoredHmac = page1.mid(4096 - 64, 64);
     
-    QByteArray calculatedHmac = hmacSha512(macKey, p1HmacData);
+    // 微信使用 HMAC-SHA1 进行校验
+    QByteArray calculatedHmac = hmacSha1(macKey, p1HmacData);
     
     return calculatedHmac == p1StoredHmac;
 }
@@ -225,22 +226,73 @@ QByteArray WeChatDecoder::deriveKey(const QByteArray& password, const QByteArray
     return key;
 }
 
-QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& data) {
-    unsigned char digest[64];
+QByteArray WeChatDecoder::hmacSha1(const QByteArray& key, const QByteArray& data) {
+    unsigned char digest[EVP_MAX_MD_SIZE];
     HMAC_CTX* ctx = HMAC_CTX_new();
     if (!ctx) {
+        qCritical() << "Failed to create HMAC_CTX";
         return QByteArray();
     }
-    HMAC_Init_ex(ctx, key.data(), key.size(), EVP_sha512(), nullptr);
-    HMAC_Update(ctx, (const unsigned char*)data.data(), data.size());
+    if (HMAC_Init_ex(ctx, key.data(), key.size(), EVP_sha1(), nullptr) != 1) {
+        qCritical() << "HMAC_Init_ex failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
+    if (HMAC_Update(ctx, reinterpret_cast<const unsigned char*>(data.data()), data.size()) != 1) {
+        qCritical() << "HMAC_Update failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
     unsigned int len = sizeof(digest);
-    HMAC_Final(ctx, digest, &len);
+    if (HMAC_Final(ctx, digest, &len) != 1) {
+        qCritical() << "HMAC_Final failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
     HMAC_CTX_free(ctx);
-    return QByteArray((char*)digest, len);
+    return QByteArray(reinterpret_cast<char*>(digest), len);
+}
+
+QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& data) {
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    HMAC_CTX* ctx = HMAC_CTX_new();
+    if (!ctx) {
+        qCritical() << "Failed to create HMAC_CTX";
+        return QByteArray();
+    }
+    if (HMAC_Init_ex(ctx, key.data(), key.size(), EVP_sha512(), nullptr) != 1) {
+        qCritical() << "HMAC_Init_ex failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
+    if (HMAC_Update(ctx, reinterpret_cast<const unsigned char*>(data.data()), data.size()) != 1) {
+        qCritical() << "HMAC_Update failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
+    unsigned int len = sizeof(digest);
+    if (HMAC_Final(ctx, digest, &len) != 1) {
+        qCritical() << "HMAC_Final failed";
+        HMAC_CTX_free(ctx);
+        return QByteArray();
+    }
+    HMAC_CTX_free(ctx);
+    return QByteArray(reinterpret_cast<char*>(digest), len);
 }
 
 QPixmap WeChatDecoder::decryptImage(const QString& datPath) {
+    Q_UNUSED(datPath);
+    // TODO: 实现微信图片解密逻辑
     return QPixmap();
+}
+
+bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key) {
+    Q_UNUSED(dbPath);
+    Q_UNUSED(outputPath);
+    Q_UNUSED(key);
+    // TODO: 实现 SQLite 数据库解密逻辑
+    qWarning() << "decryptDatabase not yet implemented";
+    return false;
 }
 
 QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const QString& key) {

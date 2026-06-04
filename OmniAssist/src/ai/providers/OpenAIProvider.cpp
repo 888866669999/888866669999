@@ -5,11 +5,12 @@
 #include <QEventLoop>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QTimer>
 #include <QDebug>
 #include <QDateTime>
 
 OpenAIProvider::OpenAIProvider(QObject* parent) 
-    : QObject(parent), m_networkManager(new QNetworkAccessManager(this)) {
+    : QObject(parent), m_networkManager(new QNetworkAccessManager(this)), m_timeoutMs(30000) {
     m_apiUrl = "https://api.openai.com/v1/chat/completions";
     m_model = "gpt-4o-mini";
 }
@@ -61,9 +62,28 @@ QString OpenAIProvider::callApi(const QString& systemPrompt, const QString& user
 
     QNetworkReply* reply = m_networkManager->post(request, requestData);
 
+    // 设置超时定时器
+    QTimer* timer = new QTimer();
+    timer->setSingleShot(true);
+    
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer->start(m_timeoutMs);
     loop.exec();
+    
+    // 检查是否超时
+    if (timer->isActive()) {
+        timer->stop();  // 请求在超时前完成
+    } else {
+        // 请求超时，中止请求
+        reply->abort();
+        qWarning() << "API request timed out after" << m_timeoutMs << "ms";
+        reply->deleteLater();
+        delete timer;
+        return QString();
+    }
+    delete timer;
 
     QString result;
     if (reply->error() == QNetworkReply::NoError) {

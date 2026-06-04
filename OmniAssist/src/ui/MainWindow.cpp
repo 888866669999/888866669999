@@ -614,7 +614,7 @@ void MainWindow::onAIReplyClicked() {
                     <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2</div>
                 </div>
             </div>
-        )").arg(reply).arg(timeStr);
+        )").arg(reply.toHtmlEscaped()).arg(timeStr.toHtmlEscaped());
         
         m_chatView->append(html);
         m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());
@@ -641,7 +641,7 @@ void MainWindow::onSummaryClicked() {
     m_chatView->append("");
     m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
     m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">📝 会议纪要</div>)");
-    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + summary["summary"].toString() + "</div>");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + summary["summary"].toString().toHtmlEscaped() + "</div>");
     m_chatView->append("</div>");
     
     m_summaryBtn->setEnabled(true);
@@ -665,7 +665,7 @@ void MainWindow::onPersonaClicked() {
     m_chatView->append("");
     m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
     m_chatView->append(R"(<div style="font-weight: bold; color: #67c23a; font-size: 14px; margin-bottom: 12px;">👤 人物画像分析</div>)");
-    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + analysis + "</div>");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + analysis.toHtmlEscaped() + "</div>");
     m_chatView->append("</div>");
     
     m_personaBtn->setEnabled(true);

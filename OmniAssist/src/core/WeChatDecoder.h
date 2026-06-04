@@ -54,6 +54,10 @@ private:
     bool isValidKey(const QString& key, const QString& dbPath);
     QStringList findWeChatProcesses();
 
+    QByteArray deriveKey(const QByteArray& password, const QByteArray& salt, int iterations, int dklen);
+    QByteArray hmacSha1(const QByteArray& key, const QByteArray& data);
+    QByteArray hmacSha512(const QByteArray& key, const QByteArray& data);
+
     QString m_lastDbPath;
     QString m_lastKey;
 };

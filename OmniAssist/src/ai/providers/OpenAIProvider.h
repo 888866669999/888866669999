@@ -30,6 +30,7 @@ private:
     QString m_apiKey;
     QString m_apiUrl;
     QString m_model;
+    int m_timeoutMs;  // 请求超时时间（毫秒）
 };
 
 #endif
