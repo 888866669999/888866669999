@@ -14,9 +14,18 @@
 #include <algorithm>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <QMutex>
+
+// 用于生成唯一数据库连接名称的计数器
+static QMutex dbMutex;
+static int dbConnectionCounter = 0;
+
+static QString generateUniqueConnectionName(const QString& prefix) {
+    QMutexLocker locker(&dbMutex);
+    return QString("%1_%2").arg(prefix).arg(++dbConnectionCounter);
+}
 
 WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
 }
 
 WeChatDecoder::~WeChatDecoder() {
@@ -229,13 +238,15 @@ QByteArray WeChatDecoder::deriveKey(const QByteArray& password, const QByteArray
 
 QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& data) {
     unsigned char digest[64];
-    HMAC_CTX ctx;
-    HMAC_CTX_init(&ctx);
-    HMAC_Init_ex(&ctx, key.data(), key.size(), EVP_sha512(), nullptr);
-    HMAC_Update(&ctx, (const unsigned char*)data.data(), data.size());
+    HMAC_CTX* ctx = HMAC_CTX_new();
+    if (!ctx) {
+        return QByteArray();
+    }
+    HMAC_Init_ex(ctx, key.data(), key.size(), EVP_sha512(), nullptr);
+    HMAC_Update(ctx, (const unsigned char*)data.data(), data.size());
     unsigned int len = sizeof(digest);
-    HMAC_Final(&ctx, digest, &len);
-    HMAC_CTX_cleanup(&ctx);
+    HMAC_Final(ctx, digest, &len);
+    HMAC_CTX_free(ctx);
     return QByteArray((char*)digest, len);
 }
 
@@ -252,12 +263,13 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
         return contacts;
     }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
+    QString connectionName = generateUniqueConnectionName("wechat_contacts");
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(contactDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
-        QSqlDatabase::removeDatabase("wechat_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return contacts;
     }
 
@@ -267,7 +279,7 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
     if (!query.exec(sql)) {
         qWarning() << "Query failed:" << query.lastError().text();
         db.close();
-        QSqlDatabase::removeDatabase("wechat_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return contacts;
     }
 
@@ -286,7 +298,7 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
     }
 
     db.close();
-    QSqlDatabase::removeDatabase("wechat_connection");
+    QSqlDatabase::removeDatabase(connectionName);
     
     qDebug() << "Loaded" << contacts.size() << "contacts";
     return contacts;
@@ -302,12 +314,13 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
         return messages;
     }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
+    QString connectionName = generateUniqueConnectionName("wechat_messages");
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(msgDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
-        QSqlDatabase::removeDatabase("wechat_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return messages;
     }
 
@@ -320,7 +333,7 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
     if (!query.exec()) {
         qWarning() << "Query failed:" << query.lastError().text();
         db.close();
-        QSqlDatabase::removeDatabase("wechat_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return messages;
     }
 
@@ -341,7 +354,7 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
     std::reverse(messages.begin(), messages.end());
 
     db.close();
-    QSqlDatabase::removeDatabase("wechat_connection");
+    QSqlDatabase::removeDatabase(connectionName);
     
     qDebug() << "Loaded" << messages.size() << "messages for" << talkerId;
     return messages;

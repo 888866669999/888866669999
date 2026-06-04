@@ -20,6 +20,7 @@ public:
 
 private:
     IAIServiceProvider* m_provider;
+    bool m_ownedProvider;  // 标记是否拥有 provider 的所有权
 };
 
 #endif

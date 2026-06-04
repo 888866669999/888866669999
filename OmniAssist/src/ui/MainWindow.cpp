@@ -4,7 +4,9 @@
 #include "../ai/AIService.h"
 #include "../ai/providers/OpenAIProvider.h"
 #include "../core/models/ChatMessage.h"
+#include "../core/models/Contact.h"
 #include "../core/models/Platform.h"
+#include "../automation/MessageSender.h"
 #include <QMessageBox>
 #include <QDateTime>
 #include <QThread>
@@ -13,6 +15,9 @@
 #include <QJsonObject>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    qRegisterMetaType<Contact>();
+    qRegisterMetaType<ChatMessage>();
+
     setupUI();
     setupConnections();
     resize(1200, 750);
@@ -23,6 +28,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_aiService = new AIService();
     m_openAIProvider = new OpenAIProvider(this);
     m_aiService->setProvider(m_openAIProvider);
+    m_messageSender = new MessageSender(this);
     
     loadContacts();
 }
@@ -429,6 +435,12 @@ void MainWindow::loadContacts() {
         static_cast<IPlatformAdapter*>(m_weChatAdapter) : 
         static_cast<IPlatformAdapter*>(m_qqAdapter);
 
+    if (!adapter->initialize()) {
+        QString platformName = currentPlatform == 0 ? "微信" : "QQ";
+        m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 无法初始化%1，请确保%1已安装并至少登录过一次</div>").arg(platformName));
+        return;
+    }
+
     if (!adapter->isAvailable()) {
         QString platformName = currentPlatform == 0 ? "微信" : "QQ";
         m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 未检测到%1数据目录，请确保%1已安装并至少登录过一次</div>").arg(platformName));
@@ -543,7 +555,15 @@ void MainWindow::onSendClicked() {
     QString text = m_inputEdit->toPlainText().trimmed();
     if (text.isEmpty()) return;
     
+    if (m_currentContact.id.isEmpty()) {
+        QMessageBox::warning(this, "提示", "请先选择联系人");
+        return;
+    }
+    
     m_inputEdit->clear();
+    
+    Platform platform = (m_platformTabs->currentIndex() == 0) ? Platform::WeChat : Platform::QQ;
+    bool sent = m_messageSender->sendText(platform, m_currentContact.id, text);
     
     QString timeStr = QDateTime::currentDateTime().toString("HH:mm");
     
@@ -554,10 +574,10 @@ void MainWindow::onSendClicked() {
                 <div style="background-color: #4a9eff; border-radius: 12px; padding: 10px 14px; color: white;">
                     %1
                 </div>
-                <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2</div>
+                <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2%3</div>
             </div>
         </div>
-    )").arg(text).arg(timeStr);
+    )").arg(text).arg(timeStr).arg(sent ? "" : " ⚠️ 发送失败");
     
     m_chatView->append(html);
     m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());

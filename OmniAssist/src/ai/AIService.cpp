@@ -1,14 +1,18 @@
 #include "AIService.h"
 #include <QDebug>
 
-AIService::AIService() : m_provider(nullptr) {
+AIService::AIService() : m_provider(nullptr), m_ownedProvider(false) {
 }
 
 AIService::~AIService() {
+    if (m_ownedProvider && m_provider) {
+        delete m_provider;
+    }
 }
 
 void AIService::setProvider(IAIServiceProvider* provider) {
     m_provider = provider;
+    m_ownedProvider = false;  // 外部传入的 provider 不由 AIService 管理
 }
 
 QString AIService::autoReply(const QList<ChatMessage>& context) {

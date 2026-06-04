@@ -2,6 +2,7 @@
 #define WINDOWFINDER_H
 
 #include <QString>
+#include <QList>
 #include <QWindow>
 #include <windows.h>
 

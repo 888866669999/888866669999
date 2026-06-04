@@ -17,4 +17,6 @@ struct Contact {
     QVariant extra;
 };
 
+Q_DECLARE_METATYPE(Contact)
+
 #endif

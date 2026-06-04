@@ -29,4 +29,6 @@ struct ChatMessage {
     QVariant extra;
 };
 
+Q_DECLARE_METATYPE(ChatMessage)
+
 #endif

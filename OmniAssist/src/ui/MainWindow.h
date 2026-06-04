@@ -20,6 +20,7 @@ class WeChatAdapter;
 class QQAdapter;
 class AIService;
 class OpenAIProvider;
+class MessageSender;
 struct ChatMessage;
 struct Contact;
 
@@ -72,6 +73,7 @@ private:
     QQAdapter* m_qqAdapter;
     AIService* m_aiService;
     OpenAIProvider* m_openAIProvider;
+    MessageSender* m_messageSender;
     
     Contact m_currentContact;
     QList<ChatMessage> m_currentMessages;
