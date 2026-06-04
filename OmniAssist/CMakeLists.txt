@@ -12,6 +12,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
 set(SOURCES
     src/main.cpp
     src/ui/MainWindow.cpp
+    src/core/WeChatDecoder.cpp
+    src/adapters/WeChatAdapter.cpp
 )
 
 set(HEADERS
@@ -21,6 +23,8 @@ set(HEADERS
     src/core/models/ChatMessage.h
     src/adapters/IPlatformAdapter.h
     src/ui/MainWindow.h
+    src/core/WeChatDecoder.h
+    src/adapters/WeChatAdapter.h
 )
 
 set(RESOURCES
