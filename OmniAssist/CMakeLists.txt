@@ -13,7 +13,9 @@ set(SOURCES
     src/main.cpp
     src/ui/MainWindow.cpp
     src/core/WeChatDecoder.cpp
+    src/core/QQDecoder.cpp
     src/adapters/WeChatAdapter.cpp
+    src/adapters/QQAdapter.cpp
     src/ai/AIService.cpp
     src/ai/providers/OpenAIProvider.cpp
     src/automation/WindowFinder.cpp
@@ -28,7 +30,9 @@ set(HEADERS
     src/adapters/IPlatformAdapter.h
     src/ui/MainWindow.h
     src/core/WeChatDecoder.h
+    src/core/QQDecoder.h
     src/adapters/WeChatAdapter.h
+    src/adapters/QQAdapter.h
     src/ai/AIService.h
     src/ai/Prompts.h
     src/ai/providers/IAIServiceProvider.h

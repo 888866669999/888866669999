@@ -13,11 +13,14 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QList>
+#include <QTabWidget>
 
 class WeChatAdapter;
+class QQAdapter;
 class AIService;
 class OpenAIProvider;
 struct ChatMessage;
+struct Contact;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -33,6 +36,8 @@ private slots:
     void onSummaryClicked();
     void onPersonaClicked();
     void onApiKeyChanged(const QString& key);
+    void onSearchChanged(const QString& text);
+    void onPlatformChanged(int index);
 
 private:
     void setupUI();
@@ -41,23 +46,32 @@ private:
     void loadChatHistory();
 
     QSplitter* m_splitter;
+    QLineEdit* m_searchBar;
     QListWidget* m_contactList;
     QTextEdit* m_chatView;
     QTextEdit* m_inputEdit;
+    QListWidget* m_memberList;
+
+    QWidget* m_titleBar;
+    QLabel* m_contactNameLabel;
+    QPushButton* m_toolButton;
 
     QComboBox* m_providerCombo;
     QLineEdit* m_apiKeyEdit;
     QCheckBox* m_autoReplyCheck;
+    QTabWidget* m_platformTabs;
+    
     QPushButton* m_aiReplyBtn;
     QPushButton* m_summaryBtn;
     QPushButton* m_personaBtn;
     QPushButton* m_sendBtn;
 
     WeChatAdapter* m_weChatAdapter;
+    QQAdapter* m_qqAdapter;
     AIService* m_aiService;
     OpenAIProvider* m_openAIProvider;
     
-    QString m_currentContactId;
+    Contact m_currentContact;
     QList<ChatMessage> m_currentMessages;
 };
 
