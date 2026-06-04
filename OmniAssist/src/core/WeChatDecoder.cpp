@@ -233,7 +233,11 @@ bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
     }
 
     QByteArray macKey = deriveKey(encKey, macSalt, 2, 32);
-    
+    if (macKey.isEmpty()) {
+        qWarning() << "Failed to derive MAC key";
+        return false;
+    }
+
     QByteArray p1HmacData = page1.mid(16, 4096 - 80);
     QByteArray p1StoredHmac = page1.mid(4096 - 64, 64);
     
@@ -246,10 +250,14 @@ bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
 QByteArray WeChatDecoder::deriveKey(const QByteArray& password, const QByteArray& salt, int iterations, int dklen) {
     // 使用 OpenSSL 的 PKCS5_PBKDF2_HMAC 实现标准 PBKDF2
     QByteArray key(dklen, 0);
-    PKCS5_PBKDF2_HMAC(password.data(), password.size(),
-                       reinterpret_cast<const unsigned char*>(salt.data()), salt.size(),
-                       iterations, EVP_sha1(),
-                       dklen, reinterpret_cast<unsigned char*>(key.data()));
+    int ret = PKCS5_PBKDF2_HMAC(password.data(), password.size(),
+                                  reinterpret_cast<const unsigned char*>(salt.data()), salt.size(),
+                                  iterations, EVP_sha1(),
+                                  dklen, reinterpret_cast<unsigned char*>(key.data()));
+    if (ret != 1) {
+        qCritical() << "PKCS5_PBKDF2_HMAC failed";
+        return QByteArray();
+    }
     return key;
 }
 
