@@ -14,7 +14,7 @@
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setupUI();
     setupConnections();
-    resize(1100, 700);
+    resize(1200, 750);
     setWindowTitle("OmniAssist - 全平台即时通讯智能中枢");
     
     m_weChatAdapter = new WeChatAdapter(this);
@@ -33,27 +33,53 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::setupUI() {
+    setStyleSheet(R"(
+        QMainWindow {
+            background-color: #1a1a2e;
+        }
+    )");
+
     auto* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
 
-    auto* mainLayout = new QVBoxLayout(centralWidget);
+    auto* mainLayout = new QHBoxLayout(centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    m_splitter = new QSplitter(Qt::Horizontal, this);
-    m_splitter->setHandleWidth(2);
-
-    auto* leftPanel = new QWidget(this);
-    auto* leftLayout = new QVBoxLayout(leftPanel);
+    m_leftPanel = new QWidget(this);
+    m_leftPanel->setStyleSheet("QWidget { background-color: #1a1a2e; }");
+    m_leftPanel->setFixedWidth(280);
+    auto* leftLayout = new QVBoxLayout(m_leftPanel);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
 
+    auto* searchBarWidget = new QWidget(this);
+    searchBarWidget->setStyleSheet("QWidget { background-color: #2a2a3e; padding: 8px; }");
+    auto* searchLayout = new QHBoxLayout(searchBarWidget);
+    
     m_searchBar = new QLineEdit(this);
-    m_searchBar->setPlaceholderText("搜索联系人...");
-    m_searchBar->setStyleSheet("QLineEdit { padding: 8px 12px; border-radius: 20px; background-color: #2a2a3e; color: #eaeaea; border: none; }");
-    m_searchBar->setMaximumWidth(280);
-    leftLayout->addWidget(m_searchBar);
-    leftLayout->addSpacing(8);
+    m_searchBar->setPlaceholderText("搜索");
+    m_searchBar->setStyleSheet(R"(
+        QLineEdit {
+            background-color: #3a3a4e;
+            color: #eaeaea;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        QLineEdit::placeholder {
+            color: #6a6a7e;
+        }
+    )");
+    searchLayout->addWidget(m_searchBar);
+    
+    auto* addBtn = new QPushButton(this);
+    addBtn->setIcon(QIcon::fromTheme("list-add"));
+    addBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; color: #eaeaea; padding: 8px; }");
+    searchLayout->addWidget(addBtn);
+    
+    leftLayout->addWidget(searchBarWidget);
 
     m_contactList = new QListWidget(this);
     m_contactList->setStyleSheet(R"(
@@ -63,7 +89,7 @@ void MainWindow::setupUI() {
             border: none;
         }
         QListWidget::item {
-            padding: 12px;
+            padding: 10px;
             border-bottom: 1px solid #2a2a3e;
         }
         QListWidget::item:hover {
@@ -71,31 +97,50 @@ void MainWindow::setupUI() {
         }
         QListWidget::item:selected {
             background-color: #4a9eff;
+            border-left: 3px solid #00d4ff;
         }
     )");
-    m_contactList->setMaximumWidth(300);
     m_contactList->setSelectionMode(QAbstractItemView::SingleSelection);
     leftLayout->addWidget(m_contactList);
 
-    m_splitter->addWidget(leftPanel);
+    mainLayout->addWidget(m_leftPanel);
 
     auto* centerPanel = new QWidget(this);
+    centerPanel->setStyleSheet("QWidget { background-color: #0f0f1a; }");
     auto* centerLayout = new QVBoxLayout(centerPanel);
     centerLayout->setContentsMargins(0, 0, 0, 0);
     centerLayout->setSpacing(0);
 
     m_titleBar = new QWidget(this);
-    m_titleBar->setStyleSheet("QWidget { background-color: #16213e; padding: 12px; }");
+    m_titleBar->setStyleSheet("QWidget { background-color: #16213e; padding: 12px 16px; }");
     auto* titleLayout = new QHBoxLayout(m_titleBar);
+    
     m_contactNameLabel = new QLabel("选择联系人", this);
-    m_contactNameLabel->setStyleSheet("QLabel { color: #eaeaea; font-size: 14px; font-weight: bold; }");
+    m_contactNameLabel->setStyleSheet("QLabel { color: #ffffff; font-size: 16px; font-weight: bold; }");
     titleLayout->addWidget(m_contactNameLabel);
+    
     titleLayout->addStretch();
     
-    m_toolButton = new QPushButton(this);
-    m_toolButton->setIcon(QIcon::fromTheme("system-search"));
-    m_toolButton->setStyleSheet("QPushButton { background-color: transparent; border: none; color: #eaeaea; padding: 8px; }");
-    titleLayout->addWidget(m_toolButton);
+    auto* actionButtons = new QWidget(this);
+    auto* actionLayout = new QHBoxLayout(actionButtons);
+    
+    auto* callBtn = new QPushButton(this);
+    callBtn->setIcon(QIcon::fromTheme("call-start"));
+    callBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; padding: 8px; }");
+    actionLayout->addWidget(callBtn);
+    
+    auto* videoBtn = new QPushButton(this);
+    videoBtn->setIcon(QIcon::fromTheme("video"));
+    videoBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; padding: 8px; }");
+    actionLayout->addWidget(videoBtn);
+    
+    auto* moreBtn = new QPushButton(this);
+    moreBtn->setIcon(QIcon::fromTheme("more"));
+    moreBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; padding: 8px; }");
+    actionLayout->addWidget(moreBtn);
+    
+    titleLayout->addWidget(actionButtons);
+    
     centerLayout->addWidget(m_titleBar);
 
     m_chatView = new QTextEdit(this);
@@ -107,12 +152,21 @@ void MainWindow::setupUI() {
             border: none;
             padding: 16px;
             font-size: 14px;
+            line-height: 1.5;
+        }
+        QTextEdit QScrollBar:vertical {
+            width: 6px;
+            background-color: #1a1a2e;
+        }
+        QTextEdit QScrollBar::handle:vertical {
+            background-color: #4a4a5e;
+            border-radius: 3px;
         }
     )");
     centerLayout->addWidget(m_chatView);
 
     auto* functionBar = new QWidget(this);
-    functionBar->setStyleSheet("QWidget { background-color: #16213e; padding: 8px; }");
+    functionBar->setStyleSheet("QWidget { background-color: #16213e; padding: 8px 16px; }");
     auto* functionLayout = new QHBoxLayout(functionBar);
     
     m_aiReplyBtn = new QPushButton("🎯 AI 回复", this);
@@ -126,9 +180,9 @@ void MainWindow::setupUI() {
                 background-color: #4a9eff;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-size: 12px;
+                padding: 8px 20px;
+                border-radius: 20px;
+                font-size: 13px;
             }
             QPushButton:hover {
                 background-color: #3a8eff;
@@ -139,22 +193,45 @@ void MainWindow::setupUI() {
         )");
         functionLayout->addWidget(btn);
     }
+    
     functionLayout->addStretch();
     centerLayout->addWidget(functionBar);
 
     auto* inputBar = new QWidget(this);
-    inputBar->setStyleSheet("QWidget { background-color: #16213e; padding: 12px; }");
+    inputBar->setStyleSheet("QWidget { background-color: #16213e; padding: 12px 16px; }");
     auto* inputLayout = new QVBoxLayout(inputBar);
     
+    auto* toolBar = new QWidget(this);
+    auto* toolLayout = new QHBoxLayout(toolBar);
+    
+    QIcon icons[] = {
+        QIcon::fromTheme("insert-emoji"),
+        QIcon::fromTheme("image"),
+        QIcon::fromTheme("video"),
+        QIcon::fromTheme("file"),
+        QIcon::fromTheme("mic"),
+        QIcon::fromTheme("smile")
+    };
+    
+    for (int i = 0; i < 6; ++i) {
+        QPushButton* toolBtn = new QPushButton(this);
+        toolBtn->setIcon(icons[i]);
+        toolBtn->setStyleSheet("QPushButton { background-color: transparent; border: none; padding: 8px; }");
+        toolLayout->addWidget(toolBtn);
+    }
+    toolLayout->addStretch();
+    
+    inputLayout->addWidget(toolBar);
+    
     m_inputEdit = new QTextEdit(this);
-    m_inputEdit->setMaximumHeight(100);
+    m_inputEdit->setMaximumHeight(120);
     m_inputEdit->setStyleSheet(R"(
         QTextEdit {
             background-color: #2a2a3e;
             color: #eaeaea;
             border: none;
             border-radius: 8px;
-            padding: 10px;
+            padding: 12px;
             font-size: 14px;
         }
     )");
@@ -167,48 +244,99 @@ void MainWindow::setupUI() {
             background-color: #4a9eff;
             color: white;
             border: none;
-            padding: 8px 24px;
-            border-radius: 6px;
-            font-size: 13px;
+            padding: 10px 32px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
         }
         QPushButton:hover {
             background-color: #3a8eff;
+        }
+        QPushButton:disabled {
+            background-color: #3a3a4e;
         }
     )");
     sendLayout->addStretch();
     sendLayout->addWidget(m_sendBtn);
     inputLayout->addLayout(sendLayout);
+    
     centerLayout->addWidget(inputBar);
 
-    m_splitter->addWidget(centerPanel);
+    mainLayout->addWidget(centerPanel, 1);
 
+    m_rightPanel = new QWidget(this);
+    m_rightPanel->setStyleSheet("QWidget { background-color: #1a1a2e; }");
+    m_rightPanel->setFixedWidth(240);
+    m_rightPanel->setVisible(false);
+    auto* rightLayout = new QVBoxLayout(m_rightPanel);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+    rightLayout->setSpacing(0);
+
+    auto* groupNoticeTab = new QWidget(this);
+    groupNoticeTab->setStyleSheet("QWidget { padding: 12px; }");
+    auto* noticeLayout = new QVBoxLayout(groupNoticeTab);
+    
+    auto* noticeTitle = new QLabel("群公告", this);
+    noticeTitle->setStyleSheet("QLabel { color: #eaeaea; font-size: 14px; font-weight: bold; }");
+    noticeLayout->addWidget(noticeTitle);
+    
+    m_groupNotice = new QTextEdit(this);
+    m_groupNotice->setReadOnly(true);
+    m_groupNotice->setMaximumHeight(150);
+    m_groupNotice->setStyleSheet(R"(
+        QTextEdit {
+            background-color: transparent;
+            color: #a0a0b0;
+            border: none;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+    )");
+    m_groupNotice->setText("暂无群公告");
+    noticeLayout->addWidget(m_groupNotice);
+    
+    rightLayout->addWidget(groupNoticeTab);
+    
+    auto* separator1 = new QFrame(this);
+    separator1->setFrameShape(QFrame::HLine);
+    separator1->setStyleSheet("QFrame { color: #2a2a3e; }");
+    rightLayout->addWidget(separator1);
+
+    auto* memberTab = new QWidget(this);
+    memberTab->setStyleSheet("QWidget { padding: 12px; }");
+    auto* memberLayout = new QVBoxLayout(memberTab);
+    
+    auto* memberTitle = new QLabel("群聊成员", this);
+    memberTitle->setStyleSheet("QLabel { color: #eaeaea; font-size: 14px; font-weight: bold; }");
+    memberLayout->addWidget(memberTitle);
+    
     m_memberList = new QListWidget(this);
-    m_memberList->setMaximumWidth(220);
     m_memberList->setStyleSheet(R"(
         QListWidget {
-            background-color: #1a1a2e;
+            background-color: transparent;
             color: #eaeaea;
             border: none;
         }
         QListWidget::item {
-            padding: 8px 12px;
-            border-bottom: 1px solid #2a2a3e;
+            padding: 6px 8px;
+            font-size: 12px;
         }
         QListWidget::item:hover {
             background-color: #2a2a3e;
+            border-radius: 4px;
         }
     )");
-    m_memberList->setVisible(false);
-    m_splitter->addWidget(m_memberList);
-
-    mainLayout->addWidget(m_splitter);
-
-    auto* configBar = new QWidget(this);
-    configBar->setStyleSheet("QWidget { background-color: #0f0f1a; padding: 8px 16px; }");
-    auto* configLayout = new QHBoxLayout(configBar);
+    memberLayout->addWidget(m_memberList);
     
-    configLayout->addWidget(new QLabel("API 配置:", this));
-    configLayout->addWidget(new QLabel("📱", this));
+    rightLayout->addWidget(memberTab);
+    
+    mainLayout->addWidget(m_rightPanel);
+
+    auto* statusBar = new QWidget(this);
+    statusBar->setStyleSheet("QWidget { background-color: #0f0f1a; padding: 6px 16px; }");
+    auto* statusLayout = new QHBoxLayout(statusBar);
+    
+    statusLayout->addWidget(new QLabel("API 配置:", this));
     
     m_providerCombo = new QComboBox(this);
     m_providerCombo->addItems({"OpenAI", "通义千问", "文心一言"});
@@ -219,14 +347,21 @@ void MainWindow::setupUI() {
             border: none;
             padding: 4px 8px;
             border-radius: 4px;
+            font-size: 12px;
+            min-width: 100px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #2a2a3e;
+            color: #eaeaea;
         }
     )");
-    configLayout->addWidget(m_providerCombo);
+    statusLayout->addWidget(m_providerCombo);
     
-    configLayout->addWidget(new QLabel("Key:", this));
+    statusLayout->addWidget(new QLabel("Key:", this));
+    
     m_apiKeyEdit = new QLineEdit(this);
     m_apiKeyEdit->setEchoMode(QLineEdit::Password);
-    m_apiKeyEdit->setPlaceholderText("请输入 API Key");
+    m_apiKeyEdit->setPlaceholderText("API Key");
     m_apiKeyEdit->setStyleSheet(R"(
         QLineEdit {
             background-color: #2a2a3e;
@@ -234,37 +369,44 @@ void MainWindow::setupUI() {
             border: none;
             padding: 4px 8px;
             border-radius: 4px;
+            font-size: 12px;
             min-width: 200px;
         }
     )");
-    configLayout->addWidget(m_apiKeyEdit);
+    statusLayout->addWidget(m_apiKeyEdit);
     
     m_autoReplyCheck = new QCheckBox("自动回复", this);
-    m_autoReplyCheck->setStyleSheet("QCheckBox { color: #eaeaea; }");
-    configLayout->addWidget(m_autoReplyCheck);
+    m_autoReplyCheck->setStyleSheet("QCheckBox { color: #eaeaea; font-size: 12px; }");
+    statusLayout->addWidget(m_autoReplyCheck);
+    
+    statusLayout->addStretch();
     
     m_platformTabs = new QTabWidget(this);
     m_platformTabs->addTab(new QWidget(), "💬 微信");
     m_platformTabs->addTab(new QWidget(), "🐧 QQ");
     m_platformTabs->setStyleSheet(R"(
-        QTabWidget::tab-bar {
-            alignment: center;
-        }
         QTabBar::tab {
-            background-color: #1a1a2e;
+            background-color: #2a2a3e;
             color: #eaeaea;
-            padding: 4px 12px;
-            border-radius: 4px;
+            padding: 4px 16px;
+            border-radius: 12px;
             margin: 0 4px;
+            font-size: 12px;
         }
         QTabBar::tab:selected {
             background-color: #4a9eff;
+            color: white;
         }
     )");
-    configLayout->addStretch();
-    configLayout->addWidget(m_platformTabs);
+    statusLayout->addWidget(m_platformTabs);
     
-    mainLayout->addWidget(configBar);
+    statusLayout->addSpacing(16);
+    
+    auto* statusLabel = new QLabel("✓ 已连接", this);
+    statusLabel->setStyleSheet("QLabel { color: #67c23a; font-size: 12px; }");
+    statusLayout->addWidget(statusLabel);
+    
+    mainLayout->addWidget(statusBar, 0, Qt::AlignBottom);
 }
 
 void MainWindow::setupConnections() {
@@ -288,7 +430,7 @@ void MainWindow::loadContacts() {
 
     if (!adapter->isAvailable()) {
         QString platformName = currentPlatform == 0 ? "微信" : "QQ";
-        m_chatView->setText(QString("⚠️ 未检测到%1数据目录，请确保%1已安装并至少登录过一次").arg(platformName));
+        m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 未检测到%1数据目录，请确保%1已安装并至少登录过一次</div>").arg(platformName));
         return;
     }
 
@@ -296,7 +438,7 @@ void MainWindow::loadContacts() {
     
     if (contacts.isEmpty()) {
         QString platformName = currentPlatform == 0 ? "微信" : "QQ";
-        m_chatView->setText(QString("⚠️ 未能加载%1联系人列表").arg(platformName));
+        m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 未能加载%1联系人列表</div>").arg(platformName));
         return;
     }
 
@@ -310,7 +452,7 @@ void MainWindow::loadContacts() {
         m_contactList->addItem(item);
     }
     
-    m_chatView->setText("📋 已加载 " + QString::number(contacts.size()) + " 位联系人，请选择一个开始聊天");
+    m_chatView->setText(QString("<div style='color:#a0a0b0; padding: 20px;'>📋 已加载 %1 位联系人，请选择一个开始聊天</div>").arg(contacts.size()));
 }
 
 void MainWindow::onContactClicked(QListWidgetItem* item) {
@@ -323,7 +465,20 @@ void MainWindow::onContactClicked(QListWidgetItem* item) {
     QString displayName = m_currentContact.remark.isEmpty() ? m_currentContact.name : m_currentContact.remark;
     
     m_contactNameLabel->setText(displayName);
-    m_memberList->clear();
+    
+    bool isGroup = m_currentContact.id.startsWith("group_");
+    m_rightPanel->setVisible(isGroup);
+    
+    if (isGroup) {
+        m_memberList->clear();
+        m_groupNotice->setText("暂无群公告");
+        for (int i = 1; i <= 10; ++i) {
+            QString role = (i == 1) ? "👑 群主" : (i <= 3) ? "🔧 管理员" : "";
+            QString memberName = QString("成员%1").arg(i);
+            QListWidgetItem* memberItem = new QListWidgetItem(memberName + " " + role);
+            m_memberList->addItem(memberItem);
+        }
+    }
     
     loadChatHistory();
 }
@@ -341,24 +496,43 @@ void MainWindow::loadChatHistory() {
     
     m_chatView->clear();
     
+    QString lastDate;
+    
     for (const ChatMessage& msg : messages) {
-        QString sender = msg.isSelf ? "我" : (msg.senderName.isEmpty() ? "未知" : msg.senderName);
+        QString dateStr = QDateTime::fromMSecsSinceEpoch(msg.timestamp).toString("yyyy-MM-dd");
         QString timeStr = QDateTime::fromMSecsSinceEpoch(msg.timestamp).toString("HH:mm");
-        QString color = msg.isSelf ? "#4a9eff" : "#67c23a";
+        
+        if (dateStr != lastDate) {
+            lastDate = dateStr;
+            m_chatView->append(QString(R"(
+                <div style="text-align: center; margin: 16px 0;">
+                    <span style="background-color: #2a2a3e; padding: 4px 16px; border-radius: 10px; font-size: 12px; color: #8a8a9e;">%1</span>
+                </div>
+            )").arg(dateStr));
+        }
+        
+        QString sender = msg.isSelf ? "我" : (msg.senderName.isEmpty() ? "未知" : msg.senderName);
+        QString bubbleColor = msg.isSelf ? "#4a9eff" : "#2a2a3e";
+        QString textColor = msg.isSelf ? "#ffffff" : "#eaeaea";
+        QString align = msg.isSelf ? "right" : "left";
         
         QString html = QString(R"(
-            <div style="margin-bottom: 8px;">
-                <span style="color:%1; font-size: 12px;">[%2]</span>
-                <span style="color:%1; font-weight: bold; margin-left: 8px;">%3:</span>
-                <span style="margin-left: 8px;">%4</span>
+            <div style="display: flex; justify-content: %1; margin-bottom: 12px;">
+                <div style="max-width: 70%;">
+                    <div style="color: #8a8a9e; font-size: 12px; margin-bottom: 4px; padding: 0 8px;">%2</div>
+                    <div style="background-color: %3; border-radius: 12px; padding: 10px 14px; color: %4;">
+                        %5
+                    </div>
+                    <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%6</div>
+                </div>
             </div>
-        )").arg(color).arg(timeStr).arg(sender).arg(msg.content);
+        )").arg(align).arg(sender).arg(bubbleColor).arg(textColor).arg(msg.content).arg(timeStr);
         
         m_chatView->append(html);
     }
     
     if (messages.isEmpty()) {
-        m_chatView->append("暂无聊天记录");
+        m_chatView->append("<div style='color:#a0a0b0; padding: 20px;'>暂无聊天记录</div>");
     }
     
     m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());
@@ -371,13 +545,18 @@ void MainWindow::onSendClicked() {
     m_inputEdit->clear();
     
     QString timeStr = QDateTime::currentDateTime().toString("HH:mm");
+    
     QString html = QString(R"(
-        <div style="margin-bottom: 8px;">
-            <span style="color:#4a9eff; font-size: 12px;">[%1]</span>
-            <span style="color:#4a9eff; font-weight: bold; margin-left: 8px;">我:</span>
-            <span style="margin-left: 8px;">%2</span>
+        <div style="display: flex; justify-content: right; margin-bottom: 12px;">
+            <div style="max-width: 70%;">
+                <div style="color: #8a8a9e; font-size: 12px; margin-bottom: 4px; padding: 0 8px;">我</div>
+                <div style="background-color: #4a9eff; border-radius: 12px; padding: 10px 14px; color: white;">
+                    %1
+                </div>
+                <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2</div>
+            </div>
         </div>
-    )").arg(timeStr).arg(text);
+    )").arg(text).arg(timeStr);
     
     m_chatView->append(html);
     m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());
@@ -400,13 +579,18 @@ void MainWindow::onAIReplyClicked() {
     
     if (!reply.isEmpty()) {
         QString timeStr = QDateTime::currentDateTime().toString("HH:mm");
+        
         QString html = QString(R"(
-            <div style="margin-bottom: 8px; background-color: #2a2a3e; padding: 8px; border-radius: 8px;">
-                <span style="color:#ff9800; font-size: 12px;">[%1]</span>
-                <span style="color:#ff9800; font-weight: bold; margin-left: 8px;">AI:</span>
-                <span style="margin-left: 8px;">%2</span>
+            <div style="display: flex; justify-content: left; margin-bottom: 12px;">
+                <div style="max-width: 70%;">
+                    <div style="color: #ff9800; font-size: 12px; margin-bottom: 4px; padding: 0 8px;">🤖 AI</div>
+                    <div style="background-color: #2a2a3e; border-radius: 12px; padding: 10px 14px; color: #eaeaea; border: 1px solid #ff9800;">
+                        %1
+                    </div>
+                    <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2</div>
+                </div>
             </div>
-        )").arg(timeStr).arg(reply);
+        )").arg(reply).arg(timeStr);
         
         m_chatView->append(html);
         m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());
@@ -431,10 +615,9 @@ void MainWindow::onSummaryClicked() {
     QJsonObject summary = m_aiService->generateMeetingSummary(m_currentMessages);
     
     m_chatView->append("");
-    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 12px; border-radius: 8px;">)");
-    m_chatView->append(R"(<span style="font-weight: bold; color: #4a9eff;">📝 会议纪要</span>)");
-    m_chatView->append("");
-    m_chatView->append(summary["summary"].toString());
+    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
+    m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">📝 会议纪要</div>)");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + summary["summary"].toString() + "</div>");
     m_chatView->append("</div>");
     
     m_summaryBtn->setEnabled(true);
@@ -456,10 +639,9 @@ void MainWindow::onPersonaClicked() {
     QString analysis = m_aiService->analyzeContactPersona(m_currentMessages);
     
     m_chatView->append("");
-    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 12px; border-radius: 8px;">)");
-    m_chatView->append(R"(<span style="font-weight: bold; color: #67c23a;">👤 人物画像分析</span>)");
-    m_chatView->append("");
-    m_chatView->append(analysis);
+    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
+    m_chatView->append(R"(<div style="font-weight: bold; color: #67c23a; font-size: 14px; margin-bottom: 12px;">👤 人物画像分析</div>)");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + analysis + "</div>");
     m_chatView->append("</div>");
     
     m_personaBtn->setEnabled(true);
@@ -481,5 +663,6 @@ void MainWindow::onSearchChanged(const QString& text) {
 void MainWindow::onPlatformChanged(int index) {
     m_currentContact = Contact();
     m_currentMessages.clear();
+    m_rightPanel->setVisible(false);
     loadContacts();
 }

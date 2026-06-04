@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QList>
 #include <QTabWidget>
+#include <QFrame>
 
 class WeChatAdapter;
 class QQAdapter;
@@ -45,16 +46,17 @@ private:
     void loadContacts();
     void loadChatHistory();
 
-    QSplitter* m_splitter;
+    QWidget* m_leftPanel;
+    QWidget* m_rightPanel;
     QLineEdit* m_searchBar;
     QListWidget* m_contactList;
     QTextEdit* m_chatView;
     QTextEdit* m_inputEdit;
+    QTextEdit* m_groupNotice;
     QListWidget* m_memberList;
 
     QWidget* m_titleBar;
     QLabel* m_contactNameLabel;
-    QPushButton* m_toolButton;
 
     QComboBox* m_providerCombo;
     QLineEdit* m_apiKeyEdit;

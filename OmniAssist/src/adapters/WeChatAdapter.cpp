@@ -3,41 +3,75 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QStandardPaths>
 #include "../core/WeChatDecoder.h"
 
 WeChatAdapter::WeChatAdapter(QObject* parent) 
     : QObject(parent), m_decoder(new WeChatDecoder()), m_initialized(false) {
+    m_platformIcon.addFile(":/icons/wechat.png");
 }
 
 WeChatAdapter::~WeChatAdapter() {
     delete m_decoder;
 }
 
+Platform WeChatAdapter::platform() const {
+    return Platform::WeChat;
+}
+
+QString WeChatAdapter::name() const {
+    return "微信";
+}
+
 QIcon WeChatAdapter::icon() const {
-    return QIcon();
+    return m_platformIcon;
 }
 
 bool WeChatAdapter::isAvailable() const {
-    return !m_decoder->findWeChatDataDir().isEmpty();
+    return !findWeChatDataDirs().isEmpty();
+}
+
+QStringList WeChatAdapter::findWeChatDataDirs() {
+    QStringList dirs;
+    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    
+    QString wechatFilesPath = docPath + "/WeChat Files";
+    QDir wechatDir(wechatFilesPath);
+    
+    if (wechatDir.exists()) {
+        QFileInfoList entries = wechatDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo& entry : entries) {
+            QString wxidDir = entry.absoluteFilePath();
+            QDir msgDir(wxidDir + "/Msg");
+            if (msgDir.exists()) {
+                dirs << wxidDir;
+            }
+        }
+    }
+    
+    return dirs;
 }
 
 bool WeChatAdapter::initialize() {
     if (m_initialized) return true;
 
-    m_dataDir = m_decoder->findWeChatDataDir();
-    if (m_dataDir.isEmpty()) {
-        emit errorOccurred("找不到微信数据目录");
+    QStringList dataDirs = findWeChatDataDirs();
+    if (dataDirs.isEmpty()) {
+        emit errorOccurred("找不到微信数据目录，请确保微信已登录过");
         return false;
     }
-
+    
+    m_dataDir = dataDirs.first();
     qDebug() << "WeChat data dir:" << m_dataDir;
 
-    if (!m_decoder->extractKeysFromMemory(&m_keys)) {
-        emit errorOccurred("无法从微信进程提取密钥，请确保微信正在运行");
-        return false;
+    QStringList keys;
+    if (!m_decoder->extractKeysFromMemory(&keys)) {
+        qWarning() << "无法从微信进程提取密钥，尝试直接打开数据库";
+    } else {
+        m_keys = keys;
+        qDebug() << "提取到" << m_keys.size() << "个密钥";
     }
-
-    qDebug() << "Extracted" << m_keys.size() << "keys";
 
     m_initialized = true;
     return true;
@@ -50,20 +84,24 @@ QList<Contact> WeChatAdapter::getContacts() {
         initialize();
     }
 
-    QString msgDbPath = m_dataDir + "/Msg/Msg.db";
+    QString msgDbPath = m_dataDir + "/Msg/MSG.db";
+    if (!QFile::exists(msgDbPath)) {
+        msgDbPath = m_dataDir + "/Msg/Msg.db";
+    }
+    
     if (!QFile::exists(msgDbPath)) {
         qWarning() << "MSG.db not found:" << msgDbPath;
         return contacts;
     }
 
     QString key = m_keys.isEmpty() ? QString() : m_keys.first();
-    QList<WeChatContact> wechatContacts = m_decoder->getAllContacts(msgDbPath, key);
+    QList<WeChatContact> wechatContacts = m_decoder->getAllContacts(m_dataDir, key);
 
     for (const WeChatContact& wc : wechatContacts) {
         Contact contact;
         contact.id = wc.id;
         contact.name = wc.name;
-        contact.remark = wc.remark;
+        contact.remark = wc.remark.isEmpty() ? wc.name : wc.remark;
         contact.platform = Platform::WeChat;
         contacts.append(contact);
     }
@@ -78,14 +116,8 @@ QList<ChatMessage> WeChatAdapter::getChatHistory(const QString& contactId, int l
         initialize();
     }
 
-    QString msgDbPath = m_dataDir + "/Msg/Msg.db";
-    if (!QFile::exists(msgDbPath)) {
-        qWarning() << "MSG.db not found:" << msgDbPath;
-        return messages;
-    }
-
     QString key = m_keys.isEmpty() ? QString() : m_keys.first();
-    QList<WeChatMessage> wechatMessages = m_decoder->getChatHistory(msgDbPath, key, contactId, limit);
+    QList<WeChatMessage> wechatMessages = m_decoder->getChatHistory(m_dataDir, key, contactId, limit);
 
     for (const WeChatMessage& wm : wechatMessages) {
         ChatMessage msg;
@@ -94,7 +126,19 @@ QList<ChatMessage> WeChatAdapter::getChatHistory(const QString& contactId, int l
         msg.senderId = wm.senderId;
         msg.senderName = wm.senderName;
         msg.content = wm.content;
-        msg.type = MessageType::Text;
+        
+        if (wm.type == 3) {
+            msg.type = MessageType::Image;
+        } else if (wm.type == 34) {
+            msg.type = MessageType::Audio;
+        } else if (wm.type == 43) {
+            msg.type = MessageType::Video;
+        } else if (wm.type == 49) {
+            msg.type = MessageType::File;
+        } else {
+            msg.type = MessageType::Text;
+        }
+        
         msg.isSelf = wm.isSelf;
         messages.append(msg);
     }
@@ -105,7 +149,6 @@ QList<ChatMessage> WeChatAdapter::getChatHistory(const QString& contactId, int l
 QList<ChatMessage> WeChatAdapter::getRecentMessages(int limit) {
     Q_UNUSED(limit);
     QList<ChatMessage> messages;
-    qDebug() << "getRecentMessages not implemented yet";
     return messages;
 }
 
@@ -116,4 +159,17 @@ bool WeChatAdapter::startMonitoring() {
 
 void WeChatAdapter::stopMonitoring() {
     qDebug() << "stopMonitoring not implemented yet";
+}
+
+bool WeChatAdapter::supportsRichMedia() const {
+    return true;
+}
+
+QList<MediaFile> WeChatAdapter::getMediaFilesForMessage(const QString& messageId) {
+    Q_UNUSED(messageId);
+    return QList<MediaFile>();
+}
+
+QPixmap WeChatAdapter::decryptImage(const QString& datPath) {
+    return m_decoder->decryptImage(datPath);
 }

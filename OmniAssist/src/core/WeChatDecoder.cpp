@@ -5,9 +5,11 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QFile>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
+#include <regex>
 
 WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
     QSqlDatabase::removeDatabase("wechat_connection");
@@ -18,15 +20,27 @@ WeChatDecoder::~WeChatDecoder() {
 
 QString WeChatDecoder::findWeChatDataDir() {
     QStringList possiblePaths;
-
+    
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    
+    possiblePaths << "C:/Users/" + userName + "/Documents/WeChat Files";
+    possiblePaths << "C:/Users/" + userName + "/AppData/Roaming/Tencent/WeChat";
     possiblePaths << docPath + "/WeChat Files";
-    possiblePaths << docPath + "/Tencent Files/WeChat";
+    possiblePaths << appData + "/Tencent/WeChat";
 
     for (const QString& path : possiblePaths) {
         QDir dir(path);
         if (dir.exists()) {
-            return path;
+            QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QFileInfo& entry : entries) {
+                QString wxidDir = entry.absoluteFilePath();
+                QDir msgDir(wxidDir + "/Msg");
+                if (msgDir.exists()) {
+                    return wxidDir;
+                }
+            }
         }
     }
 
@@ -59,27 +73,6 @@ bool WeChatDecoder::extractKeysFromMemory(QStringList* keys) {
     return !keys->isEmpty();
 }
 
-bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key) {
-    Q_UNUSED(dbPath);
-    Q_UNUSED(outputPath);
-    Q_UNUSED(key);
-    qWarning() << "decryptDatabase not implemented yet";
-    return false;
-}
-
-bool WeChatDecoder::verifyKey(const QString& dbPath, const QString& key) {
-    Q_UNUSED(dbPath);
-    Q_UNUSED(key);
-    qWarning() << "verifyKey not implemented yet";
-    return false;
-}
-
-QPixmap WeChatDecoder::decryptImage(const QString& datPath) {
-    Q_UNUSED(datPath);
-    qWarning() << "decryptImage not implemented yet";
-    return QPixmap();
-}
-
 QStringList WeChatDecoder::findWeChatProcesses() {
     QStringList processes;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -95,7 +88,7 @@ QStringList WeChatDecoder::findWeChatProcesses() {
         do {
             QString processName = QString::fromWCharArray(pe32.szExeFile);
             if (processName.compare("WeChat.exe", Qt::CaseInsensitive) == 0 ||
-                processName.compare("WeChatWin.dll", Qt::CaseInsensitive) == 0) {
+                processName.compare("Weixin.exe", Qt::CaseInsensitive) == 0) {
                 processes << QString::number(pe32.th32ProcessID);
             }
         } while (Process32Next(hSnapshot, &pe32));
@@ -111,44 +104,43 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
 
     MEMORY_BASIC_INFORMATION mbi;
     unsigned char* address = reinterpret_cast<unsigned char*>(sysInfo.lpMinimumApplicationAddress);
+    unsigned long long maxAddress = reinterpret_cast<unsigned long long>(sysInfo.lpMaximumApplicationAddress);
     
-    while (address < reinterpret_cast<unsigned char*>(sysInfo.lpMaximumApplicationAddress)) {
-        if (VirtualQueryEx(processHandle, address, &mbi, sizeof(mbi))) {
-            if (mbi.State == MEM_COMMIT && 
-                (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE)) {
+    const DWORD MEM_COMMIT = 0x1000;
+    const std::set<DWORD> READABLE = {0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
+
+    while (reinterpret_cast<unsigned long long>(address) < maxAddress) {
+        if (VirtualQueryEx((HANDLE)processHandle, address, &mbi, sizeof(mbi)) == 0) {
+            break;
+        }
+
+        if (mbi.State == MEM_COMMIT && READABLE.count(mbi.Protect) && 
+            mbi.RegionSize > 0 && mbi.RegionSize < 500 * 1024 * 1024) {
+            
+            QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
+            
+            if (!memory.isEmpty()) {
+                std::regex hex_re(R"(x'([0-9a-fA-F]{64,192})')");
+                std::string data_str(memory.constData(), memory.size());
+                std::smatch match;
                 
-                QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
-                
-                if (!memory.isEmpty()) {
-                    QByteArray pattern1 = "x'";
-                    int pos = 0;
-                    while ((pos = memory.indexOf(pattern1, pos)) != -1) {
-                        if (pos + 64 + 32 + 2 < memory.size()) {
-                            QByteArray candidate = memory.mid(pos + 2, 64 + 32);
-                            bool isHex = true;
-                            for (int i = 0; i < candidate.size(); ++i) {
-                                char c = candidate[i];
-                                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
-                                    isHex = false;
-                                    break;
-                                }
-                            }
-                            if (isHex && candidate.size() == 96) {
-                                QString key = "x'" + candidate + "'";
-                                if (m_foundKeys && !m_foundKeys->contains(key)) {
-                                    m_foundKeys->append(key);
-                                    qDebug() << "Found potential key:" << key.left(20) << "...";
-                                }
-                            }
-                        }
-                        pos += 2;
+                std::string::const_iterator search_start(data_str.cbegin());
+                while (std::regex_search(search_start, data_str.cend(), match, hex_re)) {
+                    QString key = "x'" + QString::fromStdString(match[1].str()) + "'";
+                    if (m_foundKeys && !m_foundKeys->contains(key)) {
+                        m_foundKeys->append(key);
+                        qDebug() << "Found potential key:" << key.left(30) << "...";
                     }
+                    search_start = match.suffix().first;
                 }
             }
-            address = static_cast<unsigned char*>(mbi.BaseAddress) + mbi.RegionSize;
-        } else {
-            address += 0x1000;
         }
+
+        unsigned long long nextAddr = reinterpret_cast<unsigned long long>(mbi.BaseAddress) + mbi.RegionSize;
+        if (nextAddr <= reinterpret_cast<unsigned long long>(address)) {
+            break;
+        }
+        address = reinterpret_cast<unsigned char*>(nextAddr);
     }
 
     return m_foundKeys && !m_foundKeys->isEmpty();
@@ -158,7 +150,7 @@ QByteArray WeChatDecoder::readProcessMemory(void* processHandle, void* address, 
     QByteArray buffer(size, 0);
     SIZE_T bytesRead = 0;
     
-    if (ReadProcessMemory(processHandle, address, buffer.data(), size, &bytesRead)) {
+    if (ReadProcessMemory((HANDLE)processHandle, address, buffer.data(), size, &bytesRead)) {
         buffer.resize(bytesRead);
         return buffer;
     }
@@ -166,17 +158,98 @@ QByteArray WeChatDecoder::readProcessMemory(void* processHandle, void* address, 
     return QByteArray();
 }
 
-bool WeChatDecoder::isValidKey(const QString& key, const QString& dbPath) {
-    Q_UNUSED(key);
-    Q_UNUSED(dbPath);
-    return false;
+bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
+    if (key.size() < 64) return false;
+    
+    QString hexKey = key.mid(2, 64);
+    QByteArray encKey = QByteArray::fromHex(hexKey.toUtf8());
+    
+    if (encKey.size() != 32) {
+        return false;
+    }
+
+    QFile file(dbPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    QByteArray page1 = file.read(4096);
+    file.close();
+
+    if (page1.size() < 4096) {
+        return false;
+    }
+
+    QByteArray salt = page1.left(16);
+    
+    QByteArray macSalt(salt);
+    for (int i = 0; i < macSalt.size(); i++) {
+        macSalt[i] = macSalt[i] ^ 0x3a;
+    }
+
+    QByteArray macKey = deriveKey(encKey, macSalt, 2, 32);
+    
+    QByteArray p1HmacData = page1.mid(16, 4096 - 80);
+    QByteArray p1StoredHmac = page1.mid(4096 - 64, 64);
+    
+    QByteArray calculatedHmac = hmacSha512(macKey, p1HmacData);
+    
+    return calculatedHmac == p1StoredHmac;
+}
+
+QByteArray WeChatDecoder::deriveKey(const QByteArray& password, const QByteArray& salt, int iterations, int dklen) {
+    const int blockSize = 64;
+    QByteArray result;
+    result.reserve(dklen);
+    
+    QByteArray currentSalt = salt;
+    QByteArray digest;
+    
+    while (result.size() < dklen) {
+        digest = hmacSha512(password, currentSalt);
+        QByteArray block = digest;
+        
+        for (int i = 1; i < iterations; i++) {
+            digest = hmacSha512(password, digest);
+            for (int j = 0; j < block.size() && j < digest.size(); j++) {
+                block[j] = block[j] ^ digest[j];
+            }
+        }
+        
+        result.append(block.left(qMin(block.size(), dklen - result.size())));
+        currentSalt = block;
+    }
+    
+    return result;
+}
+
+QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& data) {
+    unsigned char digest[64];
+    HMAC_CTX ctx;
+    HMAC_CTX_init(&ctx);
+    HMAC_Init_ex(&ctx, key.data(), key.size(), EVP_sha512(), nullptr);
+    HMAC_Update(&ctx, (const unsigned char*)data.data(), data.size());
+    unsigned int len = sizeof(digest);
+    HMAC_Final(&ctx, digest, &len);
+    HMAC_CTX_cleanup(&ctx);
+    return QByteArray((char*)digest, len);
+}
+
+QPixmap WeChatDecoder::decryptImage(const QString& datPath) {
+    return QPixmap();
 }
 
 QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const QString& key) {
     QList<WeChatContact> contacts;
 
+    QString contactDbPath = dbPath + "/Msg/MSG.db";
+    if (!QFile::exists(contactDbPath)) {
+        qWarning() << "MSG.db not found:" << contactDbPath;
+        return contacts;
+    }
+
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
-    db.setDatabaseName(dbPath);
+    db.setDatabaseName(contactDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
@@ -184,7 +257,7 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
         return contacts;
     }
 
-    QString sql = QString("SELECT UserName, NickName, RemarkName, Alias, HeadImgUrl FROM Contact;");
+    QString sql = QString("SELECT UserName, NickName, RemarkName, HeadImgUrl FROM Contact;");
     QSqlQuery query(db);
     
     if (!query.exec(sql)) {
@@ -199,8 +272,7 @@ QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const 
         contact.id = query.value(0).toString();
         contact.name = query.value(1).toString();
         contact.remark = query.value(2).toString();
-        contact.alias = query.value(3).toString();
-        contact.avatarPath = query.value(4).toString();
+        contact.avatarPath = query.value(3).toString();
         
         if (contact.remark.isEmpty()) {
             contact.remark = contact.name;
@@ -220,8 +292,14 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
                                                    const QString& talkerId, int limit) {
     QList<WeChatMessage> messages;
 
+    QString msgDbPath = dbPath + "/Msg/MSG.db";
+    if (!QFile::exists(msgDbPath)) {
+        qWarning() << "MSG.db not found:" << msgDbPath;
+        return messages;
+    }
+
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
-    db.setDatabaseName(dbPath);
+    db.setDatabaseName(msgDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
@@ -264,201 +342,3 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
     qDebug() << "Loaded" << messages.size() << "messages for" << talkerId;
     return messages;
 }
-#include "WeChatDecoder#include "WeChatDecoder.h"
-#include <QDir>
-#include#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChat#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("we#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~WeChatDecoder() {
-}
-
-QString#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~WeChatDecoder() {
-}
-
-QString WeChatDecoder::findWeChatDataDir() {
-    QStringList possiblePaths;
-
-#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~WeChatDecoder() {
-}
-
-QString WeChatDecoder::findWeChatDataDir() {
-    QStringList possiblePaths;
-
-    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~WeChatDecoder() {
-}
-
-QString WeChatDecoder::findWeChatDataDir() {
-    QStringList possiblePaths;
-
-    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    
-#include "WeChatDecoder.h"
-#include <QDir>
-#include <QStandardPaths>
-#include <QDebug>
-#include <QSqlDatabase>
-#include <QSqlQuery>
-#include <QSqlError>
-#include <QByteArray>
-#include <QCryptographicHash>
-#include <windows.h>
-#include <tlhelp32.h>
-#include <psapi.h>
-#include <memory>
-
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("wechat_connection");
-}
-
-WeChatDecoder::~WeChatDecoder() {
-}
-
-QString WeChatDecoder::findWeChatDataDir() {
-    QStringList possiblePaths;
-
-    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    
-    possiblePaths << docPath + "/WeChat Files";
-    possiblePaths << appData +
