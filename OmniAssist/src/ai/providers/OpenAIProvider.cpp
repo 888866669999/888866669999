@@ -63,33 +63,44 @@ QString OpenAIProvider::callApi(const QString& systemPrompt, const QString& user
     QNetworkReply* reply = m_networkManager->post(request, requestData);
 
     // 设置超时定时器
-    QTimer* timer = new QTimer();
-    timer->setSingleShot(true);
-    
+    QTimer timer;
+    timer.setSingleShot(true);
+
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    connect(timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-    timer->start(m_timeoutMs);
+    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(m_timeoutMs);
     loop.exec();
-    
+
     // 检查是否超时
-    if (timer->isActive()) {
-        timer->stop();  // 请求在超时前完成
-    } else {
+    if (!timer.isActive()) {
         // 请求超时，中止请求
         reply->abort();
         qWarning() << "API request timed out after" << m_timeoutMs << "ms";
         reply->deleteLater();
-        delete timer;
         return QString();
     }
-    delete timer;
+    timer.stop();
 
     QString result;
     if (reply->error() == QNetworkReply::NoError) {
         QByteArray responseData = reply->readAll();
         QJsonDocument responseDoc = QJsonDocument::fromJson(responseData);
+        if (responseDoc.isNull()) {
+            qWarning() << "Invalid JSON response from API";
+            reply->deleteLater();
+            return QString();
+        }
+
         QJsonObject responseObj = responseDoc.object();
+
+        // 检查 API 错误响应
+        if (responseObj.contains("error")) {
+            QJsonObject errorObj = responseObj["error"].toObject();
+            qWarning() << "API error:" << errorObj["message"].toString();
+            reply->deleteLater();
+            return QString();
+        }
 
         if (responseObj.contains("choices")) {
             QJsonArray choices = responseObj["choices"].toArray();
@@ -100,9 +111,14 @@ QString OpenAIProvider::callApi(const QString& systemPrompt, const QString& user
             }
         }
     } else {
-        QByteArray errorData = reply->readAll();  // 先读取响应体
-        qWarning() << "API request failed:" << reply->errorString();
-        qWarning() << "Response:" << QString::fromUtf8(errorData);
+        QByteArray errorData = reply->readAll();
+        // 处理 429 速率限制
+        if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 429) {
+            qWarning() << "API rate limit exceeded. Please wait before retrying.";
+        } else {
+            qWarning() << "API request failed:" << reply->errorString();
+            qWarning() << "Response:" << QString::fromUtf8(errorData);
+        }
     }
 
     reply->deleteLater();

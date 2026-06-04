@@ -35,7 +35,7 @@ public:
     QQDecoder();
     ~QQDecoder();
 
-    bool extractKeysFromMemory(QStringList* keys);
+    QStringList extractKeysFromMemory();
     QString findQQDataDir();
     bool decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key);
 
@@ -48,13 +48,9 @@ public:
     QList<QQMessage> getMessagesFromAPI(const QString& talkerId, int limit);
 
 private:
-    QStringList* m_foundKeys;
     QStringList findQQProcesses();
-    bool scanProcessMemory(void* processHandle);
+    bool scanProcessMemory(void* processHandle, QStringList* foundKeys);
     QByteArray readProcessMemory(void* processHandle, void* address, size_t size);
-
-    QString m_lastDbPath;
-    QString m_lastKey;
 };
 
 #endif

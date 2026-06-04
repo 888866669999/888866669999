@@ -96,11 +96,10 @@ bool WeChatAdapter::initialize() {
     m_dataDir = dataDirs.first();
     qDebug() << "WeChat data dir:" << m_dataDir;
 
-    QStringList keys;
-    if (!m_decoder->extractKeysFromMemory(&keys)) {
+    m_keys = m_decoder->extractKeysFromMemory();
+    if (m_keys.isEmpty()) {
         qWarning() << "无法从微信进程提取密钥，尝试直接打开数据库";
     } else {
-        m_keys = keys;
         qDebug() << "提取到" << m_keys.size() << "个密钥";
     }
 
@@ -112,7 +111,13 @@ QList<Contact> WeChatAdapter::getContacts() {
     QList<Contact> contacts;
 
     if (!m_initialized) {
-        initialize();
+        if (!initialize()) {
+            return contacts;
+        }
+    }
+
+    if (m_dataDir.isEmpty()) {
+        return contacts;
     }
 
     QString msgDbPath = m_dataDir + "/Msg/MSG.db";
@@ -148,7 +153,13 @@ QList<ChatMessage> WeChatAdapter::getChatHistory(const QString& contactId, int l
     QList<ChatMessage> messages;
 
     if (!m_initialized) {
-        initialize();
+        if (!initialize()) {
+            return messages;
+        }
+    }
+
+    if (m_dataDir.isEmpty()) {
+        return messages;
     }
 
     QString key = m_keys.isEmpty() ? QString() : m_keys.first();
@@ -224,6 +235,8 @@ QString WeChatAdapter::captureProcessInstallPath() {
 
 void WeChatAdapter::refreshProcessListInner(QListWidget* listWidget) {
     if (!listWidget) return;
+    
+    listWidget->clear();
     
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return;

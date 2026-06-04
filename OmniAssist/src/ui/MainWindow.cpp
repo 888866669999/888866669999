@@ -37,6 +37,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_aiService->setProvider(m_openAIProvider);
     m_messageSender = new MessageSender(this);
     m_settingsDialog = nullptr;
+
+    // Load settings and sync API key to provider and UI
+    Settings& s = Settings::instance();
+    s.load();
+    if (!s.openaiApiKey().isEmpty()) {
+        m_openAIProvider->setApiKey(s.openaiApiKey());
+    }
+    if (!s.openaiApiUrl().isEmpty()) {
+        m_openAIProvider->setApiUrl(s.openaiApiUrl());
+    }
+    if (!s.openaiModel().isEmpty()) {
+        m_openAIProvider->setModel(s.openaiModel());
+    }
     
     loadContacts();
 }
@@ -448,12 +461,6 @@ void MainWindow::loadContacts() {
         static_cast<IPlatformAdapter*>(m_weChatAdapter) : 
         static_cast<IPlatformAdapter*>(m_qqAdapter);
 
-    if (!adapter->initialize()) {
-        QString platformName = currentPlatform == 0 ? "微信" : "QQ";
-        m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 无法初始化%1，请确保%1已安装并至少登录过一次</div>").arg(platformName));
-        return;
-    }
-
     if (!adapter->isAvailable()) {
         QString platformName = currentPlatform == 0 ? "微信" : "QQ";
         m_chatView->setText(QString("<div style='color:#ff6b6b; padding: 20px;'>⚠️ 未检测到%1数据目录，请确保%1已安装并至少登录过一次</div>").arg(platformName));
@@ -607,8 +614,8 @@ void MainWindow::onAIReplyClicked() {
         return;
     }
     
-    if (m_apiKeyEdit->text().isEmpty()) {
-        QMessageBox::warning(this, "提示", "请先输入 API Key");
+    if (Settings::instance().openaiApiKey().isEmpty() && m_apiKeyEdit->text().isEmpty()) {
+        QMessageBox::warning(this, "提示", "请先在设置中输入 API Key");
         return;
     }
     
@@ -644,8 +651,8 @@ void MainWindow::onSummaryClicked() {
         return;
     }
     
-    if (m_apiKeyEdit->text().isEmpty()) {
-        QMessageBox::warning(this, "提示", "请先输入 API Key");
+    if (Settings::instance().openaiApiKey().isEmpty() && m_apiKeyEdit->text().isEmpty()) {
+        QMessageBox::warning(this, "提示", "请先在设置中输入 API Key");
         return;
     }
     
@@ -668,8 +675,8 @@ void MainWindow::onPersonaClicked() {
         return;
     }
     
-    if (m_apiKeyEdit->text().isEmpty()) {
-        QMessageBox::warning(this, "提示", "请先输入 API Key");
+    if (Settings::instance().openaiApiKey().isEmpty() && m_apiKeyEdit->text().isEmpty()) {
+        QMessageBox::warning(this, "提示", "请先在设置中输入 API Key");
         return;
     }
     
@@ -811,15 +818,17 @@ void MainWindow::setupSettingsDialog() {
 
     auto* apiUrlEdit = new QLineEdit(s.openaiApiUrl(), aiGroup);
     apiUrlEdit->setPlaceholderText("https://api.openai.com/v1/chat/completions");
-    connect(apiUrlEdit, &QLineEdit::textChanged, this, [](const QString& text) {
+    connect(apiUrlEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         Settings::instance().setOpenaiApiUrl(text);
+        m_openAIProvider->setApiUrl(text);
     });
     aiLayout->addRow("API URL", apiUrlEdit);
 
     auto* modelEdit = new QLineEdit(s.openaiModel(), aiGroup);
     modelEdit->setPlaceholderText("gpt-4o-mini");
-    connect(modelEdit, &QLineEdit::textChanged, this, [](const QString& text) {
+    connect(modelEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         Settings::instance().setOpenaiModel(text);
+        m_openAIProvider->setModel(text);
     });
     aiLayout->addRow("模型", modelEdit);
 
@@ -830,11 +839,17 @@ void MainWindow::setupSettingsDialog() {
     connect(buttonBox, &QDialogButtonBox::accepted, this, &MainWindow::onSaveSettings);
     connect(buttonBox, &QDialogButtonBox::rejected, m_settingsDialog, &QDialog::reject);
     connect(buttonBox->button(QDialogButtonBox::Reset), &QPushButton::clicked, this, [this]() {
-        Settings::instance().reset();
+        Settings& s = Settings::instance();
+        s.reset();
         m_wechatInstallEdit->clear();
         m_wechatDataEdit->clear();
         m_qqInstallEdit->clear();
         m_qqDataEdit->clear();
+        // Sync reset to provider and UI
+        m_openAIProvider->setApiKey(s.openaiApiKey());
+        m_openAIProvider->setApiUrl(s.openaiApiUrl());
+        m_openAIProvider->setModel(s.openaiModel());
+        m_apiKeyEdit->clear();
     });
     mainLayout->addWidget(buttonBox);
 
@@ -894,7 +909,14 @@ void MainWindow::onSaveSettings() {
     s.setWechatDataPath(m_wechatDataEdit->text());
     s.setQqInstallPath(m_qqInstallEdit->text());
     s.setQqDataPath(m_qqDataEdit->text());
-    s.save();
-    m_settingsDialog->accept();
-    QMessageBox::information(this, "成功", "配置已保存");
+    if (s.save()) {
+        // Sync API settings to provider
+        if (!s.openaiApiKey().isEmpty()) {
+            m_openAIProvider->setApiKey(s.openaiApiKey());
+        }
+        m_settingsDialog->accept();
+        QMessageBox::information(this, "成功", "配置已保存");
+    } else {
+        QMessageBox::critical(this, "错误", "保存配置失败，请检查文件权限");
+    }
 }

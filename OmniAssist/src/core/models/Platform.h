@@ -2,6 +2,7 @@
 #define PLATFORM_H
 
 #include <QString>
+#include <QMetaType>
 
 enum class Platform {
     WeChat,
@@ -9,6 +10,17 @@ enum class Platform {
     DingTalk,
     Unknown
 };
+Q_DECLARE_METATYPE(Platform)
+
+enum class MessageType {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+    Unknown
+};
+Q_DECLARE_METATYPE(MessageType)
 
 inline QString platformToString(Platform platform) {
     switch (platform) {

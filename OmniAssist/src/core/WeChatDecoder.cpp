@@ -62,15 +62,13 @@ QString WeChatDecoder::findWeChatDataDir() {
     return QString();
 }
 
-bool WeChatDecoder::extractKeysFromMemory(QStringList* keys) {
-    if (!keys) return false;
-    m_foundKeys = keys;
-    keys->clear();
+QStringList WeChatDecoder::extractKeysFromMemory() {
+    QStringList keys;
 
     QStringList pids = findWeChatProcesses();
     if (pids.isEmpty()) {
         qWarning() << "No WeChat process found";
-        return false;
+        return keys;
     }
 
     qDebug() << "Found WeChat processes:" << pids;
@@ -80,12 +78,12 @@ bool WeChatDecoder::extractKeysFromMemory(QStringList* keys) {
         HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
         
         if (hProcess) {
-            scanProcessMemory(hProcess);
+            scanProcessMemory(hProcess, &keys);
             CloseHandle(hProcess);
         }
     }
 
-    return !keys->isEmpty();
+    return keys;
 }
 
 QStringList WeChatDecoder::findWeChatProcesses() {
@@ -113,7 +111,7 @@ QStringList WeChatDecoder::findWeChatProcesses() {
     return processes;
 }
 
-bool WeChatDecoder::scanProcessMemory(void* processHandle) {
+bool WeChatDecoder::scanProcessMemory(void* processHandle, QStringList* foundKeys) {
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
 
@@ -135,7 +133,6 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
             
             if (!memory.isEmpty()) {
                 // 精确匹配 SQLite 密钥格式: x'64个十六进制字符'（64 字节 = 128 个十六进制字符）
-                // 微信加密密钥长度通常为 64 字节 (128 hex chars)
                 std::regex hex_re(R"(x'([0-9a-fA-F]{128})')", std::regex::icase);
                 std::string data_str(memory.constData(), memory.size());
                 std::smatch match;
@@ -143,8 +140,8 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
                 std::string::const_iterator search_start(data_str.cbegin());
                 while (std::regex_search(search_start, data_str.cend(), match, hex_re)) {
                     QString key = "x'" + QString::fromStdString(match[1].str()) + "'";
-                    if (m_foundKeys && !m_foundKeys->contains(key)) {
-                        m_foundKeys->append(key);
+                    if (foundKeys && !foundKeys->contains(key)) {
+                        foundKeys->append(key);
                         qDebug() << "Found potential key:" << key.left(30) << "...";
                     }
                     search_start = match.suffix().first;
@@ -159,7 +156,7 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
         address = reinterpret_cast<unsigned char*>(nextAddr);
     }
 
-    return m_foundKeys && !m_foundKeys->isEmpty();
+    return foundKeys && !foundKeys->isEmpty();
 }
 
 QByteArray WeChatDecoder::readProcessMemory(void* processHandle, void* address, size_t size) {
@@ -390,8 +387,8 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
     int numPages = fileSize / PAGE_SIZE;
     qDebug() << "Decrypting" << numPages << "pages";
 
-    // 提取第一页的盐值
-    QByteArray salt = fileData.mid(SALT_SIZE, SALT_SIZE);
+    // 提取第一页的盐值（前 16 字节）
+    QByteArray salt = fileData.mid(0, SALT_SIZE);
 
     // 生成 MAC 盐值
     QByteArray macSalt(salt);
@@ -400,15 +397,31 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
     }
 
     // 使用 PBKDF2 从原始密钥派生 HMAC 密钥 (iterations=2)
-    QByteArray macKey = deriveKey(encKey, macSalt, 2, 32);
+    unsigned char macKeyBuf[32];
+    if (PKCS5_PBKDF2_HMAC(encKey.data(), encKey.size(),
+                           reinterpret_cast<const unsigned char*>(macSalt.data()), macSalt.size(),
+                           2, EVP_sha1(),
+                           32, macKeyBuf) != 1) {
+        qCritical() << "PBKDF2 key derivation failed for macKey";
+        return false;
+    }
+    QByteArray macKey(reinterpret_cast<char*>(macKeyBuf), 32);
 
     // 使用 PBKDF2 从原始密钥派生加密密钥 (iterations=2, 使用 HMAC-SHA1)
-    QByteArray fileKey = deriveKey(encKey, salt, 2, 32);
+    unsigned char fileKeyBuf[32];
+    if (PKCS5_PBKDF2_HMAC(encKey.data(), encKey.size(),
+                           reinterpret_cast<const unsigned char*>(salt.data()), salt.size(),
+                           2, EVP_sha1(),
+                           32, fileKeyBuf) != 1) {
+        qCritical() << "PBKDF2 key derivation failed for fileKey";
+        return false;
+    }
+    QByteArray fileKey(reinterpret_cast<char*>(fileKeyBuf), 32);
 
     QByteArray decryptedData;
     decryptedData.reserve(fileSize);
 
-    for (int i = 0; i < numPages; i++) {
+    for (qint64 i = 0; i < numPages; i++) {
         QByteArray page = fileData.mid(i * PAGE_SIZE, PAGE_SIZE);
         if (page.size() != PAGE_SIZE) {
             qWarning() << "Page" << i << "size mismatch:" << page.size();
@@ -420,7 +433,7 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
         QByteArray pageContent;
         
         if (i == 0) {
-            // 第一页: salt + 数据内容 + HMAC
+            // 第一页: salt(16) + 数据内容 + HMAC(64)
             pageContent = page.mid(SALT_SIZE, PAGE_SIZE - SALT_SIZE - HMAC_SIZE);
         } else {
             pageContent = page.mid(0, PAGE_SIZE - HMAC_SIZE);
@@ -446,10 +459,9 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
 
         // 重组页面
         if (i == 0) {
-            // 第一页需要恢复 SQLite 文件头
-            QByteArray sqliteHeader = "SQLite format 3\000";
-            decryptedData.append(salt);  // 保留盐值
-            decryptedData.append(sqliteHeader.mid(16));  // 覆盖默认 SQLite 头的剩余部分
+            // 第一页需要恢复完整的 SQLite 文件头 (16 字节: "SQLite format 3\0")
+            QByteArray sqliteHeader("SQLite format 3", 16);
+            decryptedData.append(sqliteHeader);
             decryptedData.append(decryptedPage);
             // 填充到页面大小
             while (decryptedData.size() < PAGE_SIZE) {

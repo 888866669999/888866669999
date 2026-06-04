@@ -36,7 +36,7 @@ public:
     WeChatDecoder();
     ~WeChatDecoder();
 
-    bool extractKeysFromMemory(QStringList* keys);
+    QStringList extractKeysFromMemory();
     bool decryptDatabase(const QString& dbPath, const QString& outputPath, const QString& key);
     QString findWeChatDataDir();
     bool verifyKey(const QString& dbPath, const QString& key);
@@ -44,12 +44,11 @@ public:
     QPixmap decryptImage(const QString& datPath);
 
     QList<WeChatContact> getAllContacts(const QString& dbPath, const QString& key);
-    QList<WeChatMessage> getChatHistory(const QString& dbPath, const QString& key, 
+    QList<WeChatMessage> getChatHistory(const QString& dbPath, const QString& key,
                                          const QString& talkerId, int limit = 100);
 
 private:
-    QStringList* m_foundKeys;
-    bool scanProcessMemory(void* processHandle);
+    bool scanProcessMemory(void* processHandle, QStringList* foundKeys);
     QByteArray readProcessMemory(void* processHandle, void* address, size_t size);
     bool isValidKey(const QString& key, const QString& dbPath);
     QStringList findWeChatProcesses();
@@ -58,9 +57,6 @@ private:
     QByteArray hmacSha1(const QByteArray& key, const QByteArray& data);
     QByteArray hmacSha512(const QByteArray& key, const QByteArray& data);
     QByteArray aes256CbcDecrypt(const QByteArray& key, const QByteArray& iv, const QByteArray& data);
-
-    QString m_lastDbPath;
-    QString m_lastKey;
 };
 
 #endif

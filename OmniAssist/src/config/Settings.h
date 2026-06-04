@@ -2,10 +2,6 @@
 #define SETTINGS_H
 
 #include <QString>
-#include <QJsonObject>
-#include <QSettings>
-#include <QStandardPaths>
-#include <QDir>
 
 /**
  * 全局配置管理 - 支持自定义安装目录、数据目录、API 配置等
@@ -40,8 +36,8 @@ public:
     void setAutoReply(bool enabled);
 
     // 配置持久化
-    void save();
-    void load();
+    bool save();
+    bool load();
 
     // 重置为默认值
     void reset();

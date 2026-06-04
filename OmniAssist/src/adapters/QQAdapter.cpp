@@ -74,8 +74,8 @@ QStringList QQAdapter::findQQDataDirs() {
     }
     
     QString userName = QString::fromUtf8(qgetenv("USERNAME"));
-    
-    QString tencentFilesPath = "C:/Users/" + userName + "/Documents/Tencent Files";
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString tencentFilesPath = docPath + "/Tencent Files";
     QDir tencentDir(tencentFilesPath);
     
     if (tencentDir.exists()) {
@@ -109,11 +109,10 @@ bool QQAdapter::initialize() {
     m_dataDir = dataDirs.first();
     qDebug() << "QQ data dir:" << m_dataDir;
 
-    QStringList keys;
-    if (!m_decoder->extractKeysFromMemory(&keys)) {
+    m_keys = m_decoder->extractKeysFromMemory();
+    if (m_keys.isEmpty()) {
         qWarning() << "无法从QQ进程提取密钥，尝试直接打开数据库";
     } else {
-        m_keys = keys;
         qDebug() << "提取到" << m_keys.size() << "个密钥";
     }
 
@@ -133,7 +132,13 @@ QList<Contact> QQAdapter::getContacts() {
     QList<Contact> contacts;
 
     if (!m_initialized) {
-        initialize();
+        if (!initialize()) {
+            return contacts;
+        }
+    }
+
+    if (m_dataDir.isEmpty() && !m_useAPI) {
+        return contacts;
     }
 
     if (m_useAPI) {
@@ -144,6 +149,7 @@ QList<Contact> QQAdapter::getContacts() {
             contact.name = qc.name;
             contact.remark = qc.remark.isEmpty() ? qc.name : qc.remark;
             contact.platform = Platform::QQ;
+            contact.platformIcon = m_platformIcon;
             contacts.append(contact);
         }
         return contacts;
@@ -158,6 +164,7 @@ QList<Contact> QQAdapter::getContacts() {
         contact.name = qc.name;
         contact.remark = qc.remark.isEmpty() ? qc.name : qc.remark;
         contact.platform = Platform::QQ;
+        contact.platformIcon = m_platformIcon;
         contacts.append(contact);
     }
 
@@ -168,7 +175,13 @@ QList<ChatMessage> QQAdapter::getChatHistory(const QString& contactId, int limit
     QList<ChatMessage> messages;
 
     if (!m_initialized) {
-        initialize();
+        if (!initialize()) {
+            return messages;
+        }
+    }
+
+    if (m_dataDir.isEmpty()) {
+        return messages;
     }
 
     if (m_useAPI) {
@@ -261,6 +274,8 @@ QString QQAdapter::captureProcessInstallPath() {
 
 void QQAdapter::refreshProcessListInner(QListWidget* listWidget) {
     if (!listWidget) return;
+    
+    listWidget->clear();
     
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return;

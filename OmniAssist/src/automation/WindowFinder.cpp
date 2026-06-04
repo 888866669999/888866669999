@@ -8,11 +8,13 @@ WindowFinder::~WindowFinder() {
 }
 
 HWND WindowFinder::findWindowByTitle(const QString& title) {
-    return FindWindowW(nullptr, title.toStdWString().c_str());
+    std::wstring wTitle = title.toStdWString();
+    return FindWindowW(nullptr, wTitle.c_str());
 }
 
 HWND WindowFinder::findWindowByClass(const QString& className) {
-    return FindWindowW(className.toStdWString().c_str(), nullptr);
+    std::wstring wClass = className.toStdWString();
+    return FindWindowW(wClass.c_str(), nullptr);
 }
 
 QList<HWND> WindowFinder::findAllWindows(const QString& titleContains) {
@@ -44,9 +46,11 @@ BOOL CALLBACK WindowFinder::enumWindowsProc(HWND hwnd, LPARAM lParam) {
 }
 
 HWND WindowFinder::findChildWindow(HWND parent, const QString& className, const QString& title) {
+    std::wstring wClass = className.toStdWString();
+    std::wstring wTitle = title.toStdWString();
     return FindWindowExW(parent, nullptr, 
-        className.isEmpty() ? nullptr : className.toStdWString().c_str(),
-        title.isEmpty() ? nullptr : title.toStdWString().c_str());
+        className.isEmpty() ? nullptr : wClass.c_str(),
+        title.isEmpty() ? nullptr : wTitle.c_str());
 }
 
 bool WindowFinder::setForegroundWindow(HWND hwnd) {

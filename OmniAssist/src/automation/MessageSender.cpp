@@ -67,23 +67,24 @@ bool MessageSender::sendTextViaClipboard(HWND hwnd, const QString& text) {
     }
     QThread::msleep(100);
 
-    INPUT input = {0};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = VK_CONTROL;
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
+    // 使用 INPUT 数组一次性发送完整按键序列，确保按键状态正确
+    INPUT inputs[4] = {};
+    // Ctrl down
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_CONTROL;
+    // V down
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'V';
+    // V up
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'V';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    // Ctrl up
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_CONTROL;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
 
-    input.ki.wVk = 'V';
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
-
-    input.ki.dwFlags = KEYEVENTF_KEYUP;
-    input.ki.wVk = 'V';
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
-
-    input.ki.wVk = VK_CONTROL;
-    SendInput(1, &input, sizeof(INPUT));
+    SendInput(4, inputs, sizeof(INPUT));
     QThread::msleep(100);
 
     // 恢复剪贴板
@@ -119,25 +120,20 @@ bool MessageSender::sendFileViaClipboard(HWND hwnd, const QString& filePath) {
     }
     QThread::msleep(200);
 
-    // 执行 Ctrl+V 粘贴文件
-    INPUT input = {0};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = VK_CONTROL;
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
+    // 使用 INPUT 数组一次性发送完整按键序列
+    INPUT inputs[4] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_CONTROL;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'V';
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'V';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_CONTROL;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
 
-    input.ki.wVk = 'V';
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
-
-    input.ki.dwFlags = KEYEVENTF_KEYUP;
-    input.ki.wVk = 'V';
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(10);
-
-    input.ki.wVk = VK_CONTROL;
-    SendInput(1, &input, sizeof(INPUT));
-    QThread::msleep(100);
+    SendInput(4, inputs, sizeof(INPUT));
 
     // 恢复剪贴板
     if (oldMimeData) {

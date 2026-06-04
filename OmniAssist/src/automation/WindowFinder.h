@@ -4,7 +4,9 @@
 #include <QString>
 #include <QList>
 #include <QWindow>
+#ifdef Q_OS_WIN
 #include <windows.h>
+#endif
 
 class WindowFinder {
 public:

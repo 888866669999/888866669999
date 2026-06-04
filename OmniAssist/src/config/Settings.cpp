@@ -120,21 +120,23 @@ void Settings::save() {
     if (file.open(QIODevice::WriteOnly)) {
         file.write(doc.toJson());
         file.close();
+        return true;
     } else {
         qWarning() << "Failed to save config to" << configPath();
+        return false;
     }
 }
 
-void Settings::load() {
+bool Settings::load() {
     QFile file(configPath());
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-        return;
+        return false;
     }
 
     QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
     file.close();
 
-    if (!doc.isObject()) return;
+    if (!doc.isObject()) return false;
     QJsonObject obj = doc.object();
 
     m_wechatInstallPath = obj["wechatInstallPath"].toString();
@@ -145,6 +147,7 @@ void Settings::load() {
     m_openaiApiUrl = obj["openaiApiUrl"].toString();
     m_openaiModel = obj["openaiModel"].toString();
     m_autoReply = obj["autoReply"].toBool(false);
+    return true;
 }
 
 void Settings::reset() {
