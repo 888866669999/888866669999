@@ -4,6 +4,7 @@
 #include <QString>
 #include <QVariant>
 #include <QList>
+#include <QMetaType>
 #include "Platform.h"
 #include "MediaFile.h"
 

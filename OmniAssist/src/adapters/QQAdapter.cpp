@@ -201,6 +201,11 @@ QList<MediaFile> QQAdapter::getMediaFilesForMessage(const QString& messageId) {
     return QList<MediaFile>();
 }
 
+QPixmap QQAdapter::decryptImage(const MediaFile& mediaFile) {
+    Q_UNUSED(mediaFile);
+    return QPixmap();
+}
+
 QPixmap QQAdapter::decryptImage(const QString& datPath) {
     Q_UNUSED(datPath);
     return QPixmap();

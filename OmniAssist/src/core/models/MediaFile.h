@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QPixmap>
+#include <QMetaType>
 
 struct MediaFile {
     QString id;
@@ -12,5 +13,7 @@ struct MediaFile {
     QString fileType;
     QPixmap thumbnail;
 };
+
+Q_DECLARE_METATYPE(MediaFile)
 
 #endif

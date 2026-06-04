@@ -51,7 +51,6 @@ echo.
 :: 配置 CMake
 cmake -G "Visual Studio 17 2022" ^
     -DCMAKE_PREFIX_PATH="%QT_DIR%\msvc2019_64" ^
-    -DCMAKE_BUILD_TYPE=Release ^
     ..
 
 if errorlevel 1 (

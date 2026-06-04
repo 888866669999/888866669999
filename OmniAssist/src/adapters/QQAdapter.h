@@ -28,6 +28,8 @@ public:
     void stopMonitoring() override;
 
     bool supportsRichMedia() const override { return true; }
+    QList<MediaFile> getMediaFilesForMessage(const QString& msgId) override;
+    QPixmap decryptImage(const MediaFile& mediaFile) override;
     QPixmap decryptImage(const QString& datPath);
     
     void setUseAPI(bool useAPI);

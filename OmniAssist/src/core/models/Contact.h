@@ -5,6 +5,7 @@
 #include <QIcon>
 #include <QPixmap>
 #include <QVariant>
+#include <QMetaType>
 #include "Platform.h"
 
 struct Contact {

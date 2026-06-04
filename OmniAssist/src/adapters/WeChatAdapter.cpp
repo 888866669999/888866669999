@@ -170,6 +170,11 @@ QList<MediaFile> WeChatAdapter::getMediaFilesForMessage(const QString& messageId
     return QList<MediaFile>();
 }
 
+QPixmap WeChatAdapter::decryptImage(const MediaFile& mediaFile) {
+    Q_UNUSED(mediaFile);
+    return QPixmap();
+}
+
 QPixmap WeChatAdapter::decryptImage(const QString& datPath) {
     return m_decoder->decryptImage(datPath);
 }

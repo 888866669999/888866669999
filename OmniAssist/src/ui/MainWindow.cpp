@@ -17,6 +17,7 @@
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     qRegisterMetaType<Contact>();
     qRegisterMetaType<ChatMessage>();
+    qRegisterMetaType<MediaFile>();
 
     setupUI();
     setupConnections();
