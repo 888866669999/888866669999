@@ -14,6 +14,10 @@ set(SOURCES
     src/ui/MainWindow.cpp
     src/core/WeChatDecoder.cpp
     src/adapters/WeChatAdapter.cpp
+    src/ai/AIService.cpp
+    src/ai/providers/OpenAIProvider.cpp
+    src/automation/WindowFinder.cpp
+    src/automation/MessageSender.cpp
 )
 
 set(HEADERS
@@ -25,6 +29,12 @@ set(HEADERS
     src/ui/MainWindow.h
     src/core/WeChatDecoder.h
     src/adapters/WeChatAdapter.h
+    src/ai/AIService.h
+    src/ai/Prompts.h
+    src/ai/providers/IAIServiceProvider.h
+    src/ai/providers/OpenAIProvider.h
+    src/automation/WindowFinder.h
+    src/automation/MessageSender.h
 )
 
 set(RESOURCES
@@ -47,5 +57,7 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         user32
         gdi32
+        shell32
+        ole32
     )
 endif()
