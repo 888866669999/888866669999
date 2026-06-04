@@ -264,3 +264,201 @@ QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const 
     qDebug() << "Loaded" << messages.size() << "messages for" << talkerId;
     return messages;
 }
+#include "WeChatDecoder#include "WeChatDecoder.h"
+#include <QDir>
+#include#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChat#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("we#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~WeChatDecoder() {
+}
+
+QString#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~WeChatDecoder() {
+}
+
+QString WeChatDecoder::findWeChatDataDir() {
+    QStringList possiblePaths;
+
+#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~WeChatDecoder() {
+}
+
+QString WeChatDecoder::findWeChatDataDir() {
+    QStringList possiblePaths;
+
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~WeChatDecoder() {
+}
+
+QString WeChatDecoder::findWeChatDataDir() {
+    QStringList possiblePaths;
+
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    
+#include "WeChatDecoder.h"
+#include <QDir>
+#include <QStandardPaths>
+#include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <memory>
+
+WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
+}
+
+WeChatDecoder::~WeChatDecoder() {
+}
+
+QString WeChatDecoder::findWeChatDataDir() {
+    QStringList possiblePaths;
+
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    
+    possiblePaths << docPath + "/WeChat Files";
+    possiblePaths << appData +
