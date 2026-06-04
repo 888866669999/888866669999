@@ -2,11 +2,15 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 
 WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+    QSqlDatabase::removeDatabase("wechat_connection");
 }
 
 WeChatDecoder::~WeChatDecoder() {
@@ -166,4 +170,97 @@ bool WeChatDecoder::isValidKey(const QString& key, const QString& dbPath) {
     Q_UNUSED(key);
     Q_UNUSED(dbPath);
     return false;
+}
+
+QList<WeChatContact> WeChatDecoder::getAllContacts(const QString& dbPath, const QString& key) {
+    QList<WeChatContact> contacts;
+
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
+    db.setDatabaseName(dbPath);
+
+    if (!db.open()) {
+        qWarning() << "Failed to open database:" << db.lastError().text();
+        QSqlDatabase::removeDatabase("wechat_connection");
+        return contacts;
+    }
+
+    QString sql = QString("SELECT UserName, NickName, RemarkName, Alias, HeadImgUrl FROM Contact;");
+    QSqlQuery query(db);
+    
+    if (!query.exec(sql)) {
+        qWarning() << "Query failed:" << query.lastError().text();
+        db.close();
+        QSqlDatabase::removeDatabase("wechat_connection");
+        return contacts;
+    }
+
+    while (query.next()) {
+        WeChatContact contact;
+        contact.id = query.value(0).toString();
+        contact.name = query.value(1).toString();
+        contact.remark = query.value(2).toString();
+        contact.alias = query.value(3).toString();
+        contact.avatarPath = query.value(4).toString();
+        
+        if (contact.remark.isEmpty()) {
+            contact.remark = contact.name;
+        }
+        
+        contacts.append(contact);
+    }
+
+    db.close();
+    QSqlDatabase::removeDatabase("wechat_connection");
+    
+    qDebug() << "Loaded" << contacts.size() << "contacts";
+    return contacts;
+}
+
+QList<WeChatMessage> WeChatDecoder::getChatHistory(const QString& dbPath, const QString& key, 
+                                                   const QString& talkerId, int limit) {
+    QList<WeChatMessage> messages;
+
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "wechat_connection");
+    db.setDatabaseName(dbPath);
+
+    if (!db.open()) {
+        qWarning() << "Failed to open database:" << db.lastError().text();
+        QSqlDatabase::removeDatabase("wechat_connection");
+        return messages;
+    }
+
+    QString sql = QString("SELECT MsgId, TalkerId, Content, CreateTime, Type, IsSelf, FromUserName, NickName "
+                          "FROM MSG WHERE TalkerId = ? ORDER BY CreateTime DESC LIMIT ?;");
+    QSqlQuery query(db);
+    query.bindValue(0, talkerId);
+    query.bindValue(1, limit);
+    
+    if (!query.exec()) {
+        qWarning() << "Query failed:" << query.lastError().text();
+        db.close();
+        QSqlDatabase::removeDatabase("wechat_connection");
+        return messages;
+    }
+
+    while (query.next()) {
+        WeChatMessage msg;
+        msg.id = query.value(0).toString();
+        msg.talkerId = query.value(1).toString();
+        msg.content = query.value(2).toString();
+        msg.createTime = query.value(3).toLongLong();
+        msg.type = query.value(4).toInt();
+        msg.isSelf = query.value(5).toInt() == 1;
+        msg.senderId = query.value(6).toString();
+        msg.senderName = query.value(7).toString();
+        
+        messages.append(msg);
+    }
+
+    std::reverse(messages.begin(), messages.end());
+
+    db.close();
+    QSqlDatabase::removeDatabase("wechat_connection");
+    
+    qDebug() << "Loaded" << messages.size() << "messages for" << talkerId;
+    return messages;
 }

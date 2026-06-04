@@ -1,6 +1,9 @@
 #include "WeChatAdapter.h"
 #include <QIcon>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include "../core/WeChatDecoder.h"
 
 WeChatAdapter::WeChatAdapter(QObject* parent) 
     : QObject(parent), m_decoder(new WeChatDecoder()), m_initialized(false) {
@@ -42,15 +45,60 @@ bool WeChatAdapter::initialize() {
 
 QList<Contact> WeChatAdapter::getContacts() {
     QList<Contact> contacts;
-    qDebug() << "getContacts not implemented yet";
+
+    if (!m_initialized) {
+        initialize();
+    }
+
+    QString msgDbPath = m_dataDir + "/Msg/Msg.db";
+    if (!QFile::exists(msgDbPath)) {
+        qWarning() << "MSG.db not found:" << msgDbPath;
+        return contacts;
+    }
+
+    QString key = m_keys.isEmpty() ? QString() : m_keys.first();
+    QList<WeChatContact> wechatContacts = m_decoder->getAllContacts(msgDbPath, key);
+
+    for (const WeChatContact& wc : wechatContacts) {
+        Contact contact;
+        contact.id = wc.id;
+        contact.name = wc.name;
+        contact.remark = wc.remark;
+        contact.platform = Platform::WeChat;
+        contacts.append(contact);
+    }
+
     return contacts;
 }
 
 QList<ChatMessage> WeChatAdapter::getChatHistory(const QString& contactId, int limit) {
-    Q_UNUSED(contactId);
-    Q_UNUSED(limit);
     QList<ChatMessage> messages;
-    qDebug() << "getChatHistory not implemented yet";
+
+    if (!m_initialized) {
+        initialize();
+    }
+
+    QString msgDbPath = m_dataDir + "/Msg/Msg.db";
+    if (!QFile::exists(msgDbPath)) {
+        qWarning() << "MSG.db not found:" << msgDbPath;
+        return messages;
+    }
+
+    QString key = m_keys.isEmpty() ? QString() : m_keys.first();
+    QList<WeChatMessage> wechatMessages = m_decoder->getChatHistory(msgDbPath, key, contactId, limit);
+
+    for (const WeChatMessage& wm : wechatMessages) {
+        ChatMessage msg;
+        msg.id = wm.id;
+        msg.timestamp = wm.createTime * 1000;
+        msg.senderId = wm.senderId;
+        msg.senderName = wm.senderName;
+        msg.content = wm.content;
+        msg.type = MessageType::Text;
+        msg.isSelf = wm.isSelf;
+        messages.append(msg);
+    }
+
     return messages;
 }
 
