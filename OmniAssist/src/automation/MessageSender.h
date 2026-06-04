@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QThread>
+#include <memory>
 #include "../core/models/Platform.h"
 
 class WindowFinder;
@@ -25,7 +26,7 @@ private:
     bool sendKeys(HWND hwnd, const QString& keys);
     void pressKey(WORD key);
 
-    WindowFinder* m_windowFinder;
+    std::unique_ptr<WindowFinder> m_windowFinder;
 };
 
 #endif

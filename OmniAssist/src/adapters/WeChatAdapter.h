@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QIcon>
 #include <QListWidget>
+#include <memory>
 #include "IPlatformAdapter.h"
 #include "../core/WeChatDecoder.h"
 
@@ -47,10 +48,12 @@ private:
     void refreshProcessListInner(QListWidget* listWidget);
     QString captureProcessInstallPathInner();
 
-    WeChatDecoder* m_decoder;
+    std::unique_ptr<WeChatDecoder> m_decoder;
     QStringList m_keys;
     QString m_dataDir;
     bool m_initialized;
+    bool m_availableCache;
+    bool m_availableCached;
     QIcon m_platformIcon;
 };
 

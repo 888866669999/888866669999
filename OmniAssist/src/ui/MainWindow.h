@@ -16,6 +16,7 @@
 #include <QTabWidget>
 #include <QFrame>
 #include <QDialog>
+#include <QJsonObject>
 
 class WeChatAdapter;
 class QQAdapter;
@@ -43,6 +44,12 @@ private slots:
     void onPlatformChanged(int index);
     void onSettingsClicked();
 
+    // AI 异步回调槽
+    void onAIReplyReceived(int requestId, const QString& reply);
+    void onAISummaryReceived(int requestId, const QJsonObject& summary);
+    void onAIPersonaReceived(int requestId, const QString& persona);
+    void onAIError(int requestId, const QString& error);
+
 private:
     void setupUI();
     void setupConnections();
@@ -54,7 +61,7 @@ private:
     void onCaptureQQProcess();
     void onSaveSettings();
 
-    QWidget* m_settingsDialog;
+    QDialog* m_settingsDialog;
     QLineEdit* m_wechatInstallEdit;
     QLineEdit* m_wechatDataEdit;
     QLineEdit* m_qqInstallEdit;

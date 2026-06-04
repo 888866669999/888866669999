@@ -60,6 +60,51 @@ MainWindow::~MainWindow() {
     delete m_aiService;
 }
 
+// ===== AI 异步回调 =====
+
+void MainWindow::onAIReplyReceived(int requestId, const QString& reply) {
+    Q_UNUSED(requestId);
+    m_aiReplyBtn->setEnabled(true);
+    
+    if (reply.isEmpty()) {
+        m_chatView->append(R"(<div style="color: #ff6b6b; padding: 8px;">⚠️ AI 回复为空</div>)");
+        return;
+    }
+    
+    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
+    m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">🤖 AI 建议回复</div>)");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + reply.toHtmlEscaped() + "</div>");
+    m_chatView->append("</div>");
+}
+
+void MainWindow::onAISummaryReceived(int requestId, const QJsonObject& summary) {
+    Q_UNUSED(requestId);
+    m_summaryBtn->setEnabled(true);
+    
+    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
+    m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">📝 会议纪要</div>)");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + summary["summary"].toString().toHtmlEscaped() + "</div>");
+    m_chatView->append("</div>");
+}
+
+void MainWindow::onAIPersonaReceived(int requestId, const QString& persona) {
+    Q_UNUSED(requestId);
+    m_personaBtn->setEnabled(true);
+    
+    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
+    m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">👤 用户画像</div>)");
+    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + persona.toHtmlEscaped() + "</div>");
+    m_chatView->append("</div>");
+}
+
+void MainWindow::onAIError(int requestId, const QString& error) {
+    Q_UNUSED(requestId);
+    m_aiReplyBtn->setEnabled(true);
+    m_summaryBtn->setEnabled(true);
+    m_personaBtn->setEnabled(true);
+    m_chatView->append(QString("<div style='color: #ff6b6b; padding: 8px;'>⚠️ AI 错误: %1</div>").arg(error.toHtmlEscaped()));
+}
+
 void MainWindow::setupUI() {
     setStyleSheet(R"(
         QMainWindow {
@@ -451,6 +496,12 @@ void MainWindow::setupConnections() {
     connect(m_apiKeyEdit, &QLineEdit::textChanged, this, &MainWindow::onApiKeyChanged);
     connect(m_searchBar, &QLineEdit::textChanged, this, &MainWindow::onSearchChanged);
     connect(m_platformTabs, &QTabWidget::currentChanged, this, &MainWindow::onPlatformChanged);
+
+    // AI 异步信号连接
+    connect(m_openAIProvider, &OpenAIProvider::replyGenerated, this, &MainWindow::onAIReplyReceived);
+    connect(m_openAIProvider, &OpenAIProvider::summaryGenerated, this, &MainWindow::onAISummaryReceived);
+    connect(m_openAIProvider, &OpenAIProvider::personaGenerated, this, &MainWindow::onAIPersonaReceived);
+    connect(m_openAIProvider, &OpenAIProvider::aiError, this, &MainWindow::onAIError);
 }
 
 void MainWindow::loadContacts() {
@@ -541,7 +592,7 @@ void MainWindow::loadChatHistory() {
                 <div style="text-align: center; margin: 16px 0;">
                     <span style="background-color: #2a2a3e; padding: 4px 16px; border-radius: 10px; font-size: 12px; color: #8a8a9e;">%1</span>
                 </div>
-            )").arg(dateStr));
+            )").arg(dateStr.toHtmlEscaped()));
         }
         
         QString sender = msg.isSelf ? "我" : (msg.senderName.isEmpty() ? "未知" : msg.senderName);
@@ -620,29 +671,7 @@ void MainWindow::onAIReplyClicked() {
     }
     
     m_aiReplyBtn->setEnabled(false);
-    
-    QString reply = m_aiService->autoReply(m_currentMessages);
-    
-    if (!reply.isEmpty()) {
-        QString timeStr = QDateTime::currentDateTime().toString("HH:mm");
-        
-        QString html = QString(R"(
-            <div style="display: flex; justify-content: left; margin-bottom: 12px;">
-                <div style="max-width: 70%;">
-                    <div style="color: #ff9800; font-size: 12px; margin-bottom: 4px; padding: 0 8px;">🤖 AI</div>
-                    <div style="background-color: #2a2a3e; border-radius: 12px; padding: 10px 14px; color: #eaeaea; border: 1px solid #ff9800;">
-                        %1
-                    </div>
-                    <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2</div>
-                </div>
-            </div>
-        )").arg(reply.toHtmlEscaped()).arg(timeStr.toHtmlEscaped());
-        
-        m_chatView->append(html);
-        m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());
-    }
-    
-    m_aiReplyBtn->setEnabled(true);
+    m_openAIProvider->generateReplyAsync(m_currentMessages);
 }
 
 void MainWindow::onSummaryClicked() {
@@ -657,16 +686,7 @@ void MainWindow::onSummaryClicked() {
     }
     
     m_summaryBtn->setEnabled(false);
-    
-    QJsonObject summary = m_aiService->generateMeetingSummary(m_currentMessages);
-    
-    m_chatView->append("");
-    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
-    m_chatView->append(R"(<div style="font-weight: bold; color: #4a9eff; font-size: 14px; margin-bottom: 12px;">📝 会议纪要</div>)");
-    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + summary["summary"].toString().toHtmlEscaped() + "</div>");
-    m_chatView->append("</div>");
-    
-    m_summaryBtn->setEnabled(true);
+    m_openAIProvider->generateSummaryAsync(m_currentMessages);
 }
 
 void MainWindow::onPersonaClicked() {
@@ -681,16 +701,7 @@ void MainWindow::onPersonaClicked() {
     }
     
     m_personaBtn->setEnabled(false);
-    
-    QString analysis = m_aiService->analyzeContactPersona(m_currentMessages);
-    
-    m_chatView->append("");
-    m_chatView->append(R"(<div style="background-color: #2a2a3e; padding: 16px; border-radius: 12px; margin: 12px 0;">)");
-    m_chatView->append(R"(<div style="font-weight: bold; color: #67c23a; font-size: 14px; margin-bottom: 12px;">👤 人物画像分析</div>)");
-    m_chatView->append(R"(<div style="color: #eaeaea; line-height: 1.6;">)" + analysis.toHtmlEscaped() + "</div>");
-    m_chatView->append("</div>");
-    
-    m_personaBtn->setEnabled(true);
+    m_openAIProvider->analyzePersonaAsync(m_currentMessages);
 }
 
 void MainWindow::onApiKeyChanged(const QString& key) {

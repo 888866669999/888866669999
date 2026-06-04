@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QIcon>
 #include <QListWidget>
+#include <memory>
 #include "IPlatformAdapter.h"
 #include "../core/QQDecoder.h"
 
@@ -50,11 +51,13 @@ private:
     void refreshProcessListInner(QListWidget* listWidget);
     QString captureProcessInstallPathInner();
 
-    QQDecoder* m_decoder;
+    std::unique_ptr<QQDecoder> m_decoder;
     QStringList m_keys;
     QString m_dataDir;
     bool m_initialized;
     bool m_useAPI;
+    bool m_availableCache;
+    bool m_availableCached;
     QIcon m_platformIcon;
 };
 

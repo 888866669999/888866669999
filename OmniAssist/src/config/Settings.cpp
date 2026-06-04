@@ -104,7 +104,7 @@ void Settings::setAutoReply(bool enabled) {
 }
 
 // === 持久化 ===
-void Settings::save() {
+bool Settings::save() {
     QJsonObject obj;
     obj["wechatInstallPath"] = m_wechatInstallPath;
     obj["wechatDataPath"] = m_wechatDataPath;
@@ -117,14 +117,17 @@ void Settings::save() {
 
     QJsonDocument doc(obj);
     QFile file(configPath());
-    if (file.open(QIODevice::WriteOnly)) {
-        file.write(doc.toJson());
-        file.close();
-        return true;
-    } else {
+    if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Failed to save config to" << configPath();
         return false;
     }
+    const qint64 written = file.write(doc.toJson());
+    file.close();
+    if (written <= 0) {
+        qWarning() << "No bytes written to config file:" << configPath();
+        return false;
+    }
+    return true;
 }
 
 bool Settings::load() {
@@ -159,5 +162,7 @@ void Settings::reset() {
     m_openaiApiUrl = "https://api.openai.com/v1/chat/completions";
     m_openaiModel = "gpt-4o-mini";
     m_autoReply = false;
-    save();
+    if (!save()) {
+        qWarning() << "Failed to persist reset settings";
+    }
 }

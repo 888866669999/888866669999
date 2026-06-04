@@ -11,14 +11,13 @@
 #include <psapi.h>
 #include "../core/QQDecoder.h"
 
-QQAdapter::QQAdapter(QObject* parent) 
-    : QObject(parent), m_decoder(new QQDecoder()), m_initialized(false), m_useAPI(false) {
+QQAdapter::QQAdapter(QObject* parent)
+    : QObject(parent), m_decoder(std::make_unique<QQDecoder>()), m_initialized(false), m_useAPI(false),
+      m_availableCache(false), m_availableCached(false) {
     m_platformIcon.addFile(":/icons/qq.png");
 }
 
-QQAdapter::~QQAdapter() {
-    delete m_decoder;
-}
+QQAdapter::~QQAdapter() = default;
 
 Platform QQAdapter::platform() const {
     return Platform::QQ;
@@ -33,7 +32,11 @@ QIcon QQAdapter::icon() const {
 }
 
 bool QQAdapter::isAvailable() const {
-    return !findQQDataDirs().isEmpty();
+    if (!m_availableCached) {
+        m_availableCache = !findQQDataDirs().isEmpty();
+        m_availableCached = true;
+    }
+    return m_availableCache;
 }
 
 QStringList QQAdapter::findQQDataDirs() {
@@ -73,7 +76,7 @@ QStringList QQAdapter::findQQDataDirs() {
         }
     }
     
-    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    // 使用 QStandardPaths 获取文档目录（跨平台兼容）
     QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     QString tencentFilesPath = docPath + "/Tencent Files";
     QDir tencentDir(tencentFilesPath);
@@ -155,8 +158,7 @@ QList<Contact> QQAdapter::getContacts() {
         return contacts;
     }
 
-    QString key = m_keys.isEmpty() ? QString() : m_keys.first();
-    QList<QQContact> qqContacts = m_decoder->getAllContacts(m_dataDir, key);
+    QList<QQContact> qqContacts = m_decoder->getAllContacts(m_dataDir, m_keys.isEmpty() ? QString() : m_keys.first());
 
     for (const QQContact& qc : qqContacts) {
         Contact contact;
@@ -200,8 +202,7 @@ QList<ChatMessage> QQAdapter::getChatHistory(const QString& contactId, int limit
         return messages;
     }
 
-    QString key = m_keys.isEmpty() ? QString() : m_keys.first();
-    QList<QQMessage> qqMessages = m_decoder->getChatHistory(m_dataDir, key, contactId, limit);
+    QList<QQMessage> qqMessages = m_decoder->getChatHistory(m_dataDir, m_keys.isEmpty() ? QString() : m_keys.first(), contactId, limit);
 
     for (const QQMessage& qm : qqMessages) {
         ChatMessage msg;

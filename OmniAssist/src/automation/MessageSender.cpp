@@ -4,7 +4,6 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QUrl>
-#include <QApplication>
 #include <QScreen>
 #include <QRandomGenerator>
 #include <QDebug>
@@ -12,13 +11,11 @@
 #include <QHash>
 #include <windows.h>
 
-MessageSender::MessageSender(QObject* parent) 
-    : QObject(parent), m_windowFinder(new WindowFinder()) {
+MessageSender::MessageSender(QObject* parent)
+    : QObject(parent), m_windowFinder(std::make_unique<WindowFinder>()) {
 }
 
-MessageSender::~MessageSender() {
-    delete m_windowFinder;
-}
+MessageSender::~MessageSender() = default;
 
 void MessageSender::addRandomDelay() {
     int delayMs = 1000 + QRandomGenerator::global()->bounded(2000);
@@ -46,9 +43,14 @@ void MessageSender::simulateMouseMovement() {
 }
 
 void MessageSender::pressKey(WORD key) {
-    keybd_event(key, 0, 0, 0);
-    QThread::msleep(10);
-    keybd_event(key, 0, KEYEVENTF_KEYUP, 0);
+    // 使用 SendInput 替代已弃用的 keybd_event
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = key;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = key;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, inputs, sizeof(INPUT));
     QThread::msleep(10);
 }
 
@@ -256,32 +258,49 @@ bool MessageSender::sendKeys(HWND hwnd, const QString& keys) {
     };
 
     bool shiftDown = false;
+    Q_UNUSED(shiftDown);
     auto typeChar = [&](QChar ch) {
         if (shiftChars.contains(ch)) {
             WORD baseKey = shiftChars[ch];
-            // 按下 Shift
-            keybd_event(VK_SHIFT, 0, 0, 0);
-            QThread::msleep(10);
-            // 按下基础键
-            keybd_event(baseKey, 0, 0, 0);
-            QThread::msleep(10);
-            keybd_event(baseKey, 0, KEYEVENTF_KEYUP, 0);
-            QThread::msleep(10);
-            // 释放 Shift
-            keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+            // 使用 SendInput 数组一次性发送 Shift+Key
+            INPUT inputs[4] = {};
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].ki.wVk = VK_SHIFT;
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].ki.wVk = baseKey;
+            inputs[2].type = INPUT_KEYBOARD;
+            inputs[2].ki.wVk = baseKey;
+            inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[3].type = INPUT_KEYBOARD;
+            inputs[3].ki.wVk = VK_SHIFT;
+            inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(4, inputs, sizeof(INPUT));
             QThread::msleep(10);
         } else if (charToVKey.contains(ch)) {
             WORD vk = charToVKey[ch];
-            keybd_event(vk, 0, 0, 0);
-            QThread::msleep(10);
-            keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
-            QThread::msleep(10);
+            pressKey(vk);
         }
+    };
+
+    // 辅助 lambda：使用 SendInput 发送 Ctrl+组合键
+    auto pressCtrlCombo = [](WORD vk) {
+        INPUT inputs[4] = {};
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].ki.wVk = VK_CONTROL;
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].ki.wVk = vk;
+        inputs[2].type = INPUT_KEYBOARD;
+        inputs[2].ki.wVk = vk;
+        inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs[3].type = INPUT_KEYBOARD;
+        inputs[3].ki.wVk = VK_CONTROL;
+        inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(4, inputs, sizeof(INPUT));
     };
 
     for (int i = 0; i < keys.size(); i++) {
         QChar ch = keys[i];
-        
+
         // 特殊组合键处理
         if (ch == '{') {
             // 查找闭合括号
@@ -299,56 +318,21 @@ bool MessageSender::sendKeys(HWND hwnd, const QString& keys) {
                 } else if (combo == "BACK" || combo == "BACKSPACE") {
                     pressKey(VK_BACK);
                 } else if (combo == "CTRL+C") {
-                    keybd_event(VK_CONTROL, 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('C', 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('C', 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
-                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
+                    pressCtrlCombo('C');
                 } else if (combo == "CTRL+V") {
-                    keybd_event(VK_CONTROL, 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('V', 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('V', 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
-                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
+                    pressCtrlCombo('V');
                 } else if (combo == "CTRL+A") {
-                    keybd_event(VK_CONTROL, 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('A', 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('A', 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
-                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
+                    pressCtrlCombo('A');
                 } else if (combo == "CTRL+X") {
-                    keybd_event(VK_CONTROL, 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('X', 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('X', 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
-                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
+                    pressCtrlCombo('X');
                 } else if (combo == "CTRL+Z") {
-                    keybd_event(VK_CONTROL, 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('Z', 0, 0, 0);
-                    QThread::msleep(10);
-                    keybd_event('Z', 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
-                    keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-                    QThread::msleep(10);
+                    pressCtrlCombo('Z');
                 }
                 i = closeIdx;
                 continue;
             }
         }
-        
+
         typeChar(ch);
     }
 

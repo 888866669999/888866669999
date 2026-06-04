@@ -27,7 +27,7 @@ static QString generateUniqueConnectionName(const QString& prefix) {
     return QString("%1_%2").arg(prefix).arg(++dbConnectionCounter);
 }
 
-WeChatDecoder::WeChatDecoder() : m_foundKeys(nullptr) {
+WeChatDecoder::WeChatDecoder() {
 }
 
 WeChatDecoder::~WeChatDecoder() {
@@ -35,15 +35,20 @@ WeChatDecoder::~WeChatDecoder() {
 
 QString WeChatDecoder::findWeChatDataDir() {
     QStringList possiblePaths;
-    
+
     QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
-    
-    possiblePaths << "C:/Users/" + userName + "/Documents/WeChat Files";
-    possiblePaths << "C:/Users/" + userName + "/AppData/Roaming/Tencent/WeChat";
+
+    // 跨平台优先使用 QStandardPaths
     possiblePaths << docPath + "/WeChat Files";
     possiblePaths << appData + "/Tencent/WeChat";
+
+    // Windows 特定路径（用户目录）
+    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    if (!userName.isEmpty()) {
+        possiblePaths << "C:/Users/" + userName + "/Documents/WeChat Files";
+        possiblePaths << "C:/Users/" + userName + "/AppData/Roaming/Tencent/WeChat";
+    }
 
     for (const QString& path : possiblePaths) {
         QDir dir(path);
@@ -129,12 +134,26 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle, QStringList* foundKey
         if (mbi.State == MEM_COMMIT && READABLE.count(mbi.Protect) && 
             mbi.RegionSize > 0 && mbi.RegionSize < 500 * 1024 * 1024) {
             
-            QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
+            // 分块读取大内存区域（每块 64MB），避免单次读取过大导致部分读取失败
+            const size_t CHUNK_SIZE = 64 * 1024 * 1024;
+            unsigned char* baseAddr = reinterpret_cast<unsigned char*>(mbi.BaseAddress);
+            size_t regionSize = mbi.RegionSize;
             
-            if (!memory.isEmpty()) {
-                // 精确匹配 SQLite 密钥格式: x'64个十六进制字符'（64 字节 = 128 个十六进制字符）
+            // 滑动窗口：保留上一块末尾的 130 字节（密钥模式最长 130 字节 - x'128hex'）
+            QByteArray overlapBuffer;
+            
+            for (size_t offset = 0; offset < regionSize; offset += CHUNK_SIZE) {
+                size_t chunkSize = qMin(static_cast<size_t>(CHUNK_SIZE), regionSize - offset);
+                QByteArray chunk = readProcessMemory(processHandle, baseAddr + offset, chunkSize);
+                
+                if (chunk.isEmpty()) continue;
+                
+                // 拼接 overlap buffer 和当前块
+                QByteArray searchData = overlapBuffer + chunk;
+                
+                // 精确匹配 SQLite 密钥格式: x'128个十六进制字符'（64 字节 = 128 hex chars）
                 std::regex hex_re(R"(x'([0-9a-fA-F]{128})')", std::regex::icase);
-                std::string data_str(memory.constData(), memory.size());
+                std::string data_str(searchData.constData(), searchData.size());
                 std::smatch match;
                 
                 std::string::const_iterator search_start(data_str.cbegin());
@@ -145,6 +164,13 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle, QStringList* foundKey
                         qDebug() << "Found potential key:" << key.left(30) << "...";
                     }
                     search_start = match.suffix().first;
+                }
+                
+                // 保留当前块末尾 130 字节作为下次的 overlap（处理跨块边界密钥）
+                if (offset + chunkSize < regionSize && chunk.size() >= 130) {
+                    overlapBuffer = chunk.right(130);
+                } else {
+                    overlapBuffer.clear();
                 }
             }
         }
@@ -160,10 +186,10 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle, QStringList* foundKey
 }
 
 QByteArray WeChatDecoder::readProcessMemory(void* processHandle, void* address, size_t size) {
-    // 限制读取大小以防止整数溢出
-    const size_t MAX_READ_SIZE = 100 * 1024 * 1024;  // 100MB
-    if (size > MAX_READ_SIZE) {
-        size = MAX_READ_SIZE;
+    // 防止 size 过大（64MB 上限，配合 scanProcessMemory 的分块逻辑）
+    const size_t MAX_CHUNK = 64 * 1024 * 1024;
+    if (size == 0 || size > MAX_CHUNK) {
+        size = MAX_CHUNK;
     }
     
     QByteArray buffer(static_cast<int>(size), 0);
@@ -297,36 +323,46 @@ QPixmap WeChatDecoder::decryptImage(const QString& datPath) {
     }
 
     // 微信图片使用 XOR 加密，通过文件头确定密钥
-    // JPEG 文件头: FF D8 FF
-    // PNG 文件头: 89 50 4E 47
-    // GIF 文件头: 47 49 46 38
+    // 需要验证多个字节以避免误匹配
     quint8 xorKey = 0;
+    bool foundKey = false;
     
-    // 尝试 JPEG 头 (最常见的微信图片格式)
-    quint8 key1 = data[0] ^ 0xFF;
-    quint8 key2 = data[1] ^ 0xD8;
-    
-    if (key1 == key2) {
-        // JPEG 格式
-        xorKey = key1;
-    } else {
-        // 尝试 PNG 头
-        quint8 key3 = data[0] ^ 0x89;
-        quint8 key4 = data[1] ^ 0x50;
-        if (key3 == key4) {
-            xorKey = key3;
-        } else {
-            // 尝试 GIF 头
-            quint8 key5 = data[0] ^ 0x47;
-            quint8 key6 = data[1] ^ 0x49;
-            if (key5 == key6) {
-                xorKey = key5;
-            } else {
-                // 使用前两个字节异或作为密钥
-                xorKey = key1;
-                qWarning() << "Unknown image format, using fallback XOR key";
-            }
+    // JPEG: FF D8 FF E0/E1 (前 3 个字节应匹配，第四个字节在 0xE0-0xEF)
+    if ((quint8)data[0] == (0xFF ^ (quint8)data[0] ^ 0xFF) &&
+        (quint8)data[1] == (0xD8 ^ (quint8)data[0] ^ 0xFF) &&
+        (quint8)data[2] == (0xFF ^ (quint8)data[0] ^ 0xFF)) {
+        quint8 candidate = data[0] ^ 0xFF;
+        if (data[1] == (quint8)(0xD8 ^ candidate) && data[2] == (quint8)(0xFF ^ candidate)) {
+            xorKey = candidate;
+            foundKey = true;
         }
+    }
+    
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (!foundKey && data.size() >= 4) {
+        quint8 candidate = data[0] ^ 0x89;
+        if (data[1] == (quint8)(0x50 ^ candidate) && 
+            data[2] == (quint8)(0x4E ^ candidate) &&
+            data[3] == (quint8)(0x47 ^ candidate)) {
+            xorKey = candidate;
+            foundKey = true;
+        }
+    }
+    
+    // GIF: 47 49 46 38 (GIF8)
+    if (!foundKey && data.size() >= 4) {
+        quint8 candidate = data[0] ^ 0x47;
+        if (data[1] == (quint8)(0x49 ^ candidate) &&
+            data[2] == (quint8)(0x46 ^ candidate) &&
+            data[3] == (quint8)(0x38 ^ candidate)) {
+            xorKey = candidate;
+            foundKey = true;
+        }
+    }
+    
+    if (!foundKey) {
+        qWarning() << "Unknown image format, cannot determine XOR key:" << datPath;
+        return QPixmap();
     }
 
     qDebug() << "XOR key:" << QString("0x%1").arg(xorKey, 2, 16, QChar('0'));
@@ -369,26 +405,33 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
         return false;
     }
 
-    QByteArray fileData = inFile.readAll();
-    inFile.close();
-
     const int PAGE_SIZE = 4096;
     const int HMAC_SIZE = 64;   // HMAC-SHA512
     const int SALT_SIZE = 16;
     const int IV_SIZE = 16;
     const int MAC_SALT_XOR = 0x3a;
 
-    qint64 fileSize = fileData.size();
+    qint64 fileSize = inFile.size();
     if (fileSize % PAGE_SIZE != 0) {
         qWarning() << "File size is not a multiple of page size:" << fileSize;
+        inFile.close();
         return false;
     }
 
-    int numPages = fileSize / PAGE_SIZE;
-    qDebug() << "Decrypting" << numPages << "pages";
+    qint64 numPages = fileSize / PAGE_SIZE;
+    qDebug() << "Decrypting" << numPages << "pages (streaming mode)";
+
+    // 读取第一页获取 salt
+    QByteArray firstPage(PAGE_SIZE, 0);
+    if (inFile.read(firstPage.data(), PAGE_SIZE) != PAGE_SIZE) {
+        qWarning() << "Failed to read first page";
+        inFile.close();
+        return false;
+    }
+    inFile.seek(0);  // 回到文件开头重新流式处理
 
     // 提取第一页的盐值（前 16 字节）
-    QByteArray salt = fileData.mid(0, SALT_SIZE);
+    QByteArray salt = firstPage.mid(0, SALT_SIZE);
 
     // 生成 MAC 盐值
     QByteArray macSalt(salt);
@@ -403,6 +446,7 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
                            2, EVP_sha1(),
                            32, macKeyBuf) != 1) {
         qCritical() << "PBKDF2 key derivation failed for macKey";
+        inFile.close();
         return false;
     }
     QByteArray macKey(reinterpret_cast<char*>(macKeyBuf), 32);
@@ -414,24 +458,40 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
                            2, EVP_sha1(),
                            32, fileKeyBuf) != 1) {
         qCritical() << "PBKDF2 key derivation failed for fileKey";
+        inFile.close();
         return false;
     }
     QByteArray fileKey(reinterpret_cast<char*>(fileKeyBuf), 32);
 
-    QByteArray decryptedData;
-    decryptedData.reserve(fileSize);
+    // 准备 SQLite 文件头（用于覆盖第一页的 salt）
+    QByteArray sqliteHeader("SQLite format 3", 16);
+
+    // 打开输出文件
+    QFile outFile(outputPath);
+    if (!outFile.open(QIODevice::WriteOnly)) {
+        qWarning() << "Failed to open output file:" << outputPath;
+        inFile.close();
+        return false;
+    }
+
+    // 流式处理：一次一页，避免 OOM
+    QByteArray page(PAGE_SIZE, 0);
+    bool firstPageWritten = false;
+    int failedPages = 0;  // 跟踪解密失败的页面数
 
     for (qint64 i = 0; i < numPages; i++) {
-        QByteArray page = fileData.mid(i * PAGE_SIZE, PAGE_SIZE);
-        if (page.size() != PAGE_SIZE) {
-            qWarning() << "Page" << i << "size mismatch:" << page.size();
+        if (inFile.read(page.data(), PAGE_SIZE) != PAGE_SIZE) {
+            qWarning() << "Failed to read page" << i;
+            inFile.close();
+            outFile.close();
+            QFile::remove(outputPath);
             return false;
         }
 
         // 提取 HMAC 和数据
         QByteArray storedHmac = page.mid(PAGE_SIZE - HMAC_SIZE, HMAC_SIZE);
         QByteArray pageContent;
-        
+
         if (i == 0) {
             // 第一页: salt(16) + 数据内容 + HMAC(64)
             pageContent = page.mid(SALT_SIZE, PAGE_SIZE - SALT_SIZE - HMAC_SIZE);
@@ -439,11 +499,10 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
             pageContent = page.mid(0, PAGE_SIZE - HMAC_SIZE);
         }
 
-        // 验证 HMAC
+        // 验证 HMAC（仅警告，不中断）
         QByteArray calculatedHmac = hmacSha512(macKey, pageContent);
         if (calculatedHmac != storedHmac) {
             qWarning() << "HMAC verification failed for page" << i;
-            // 不中断，继续解密（可能是数据库结构差异）
         }
 
         // 提取 IV 并解密
@@ -454,36 +513,61 @@ bool WeChatDecoder::decryptDatabase(const QString& dbPath, const QString& output
         QByteArray decryptedPage = aes256CbcDecrypt(fileKey, iv, encryptedContent);
         if (decryptedPage.isEmpty()) {
             qWarning() << "Decryption failed for page" << i;
-            return false;
-        }
-
-        // 重组页面
-        if (i == 0) {
-            // 第一页需要恢复完整的 SQLite 文件头 (16 字节: "SQLite format 3\0")
-            QByteArray sqliteHeader("SQLite format 3", 16);
-            decryptedData.append(sqliteHeader);
-            decryptedData.append(decryptedPage);
-            // 填充到页面大小
-            while (decryptedData.size() < PAGE_SIZE) {
-                decryptedData.append('\0');
+            failedPages++;
+            // 早期失败检测：连续失败过多说明密钥错误，停止处理
+            if (failedPages >= 3) {
+                qCritical() << "Too many consecutive page failures, key is likely wrong";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
             }
+            // 单次失败：写入空页占位，继续处理（避免单页损坏导致整个数据库丢失）
+            decryptedPage = QByteArray(encryptedContent.size(), '\0');
+        }
+
+        // 写入解密后的页面
+        if (i == 0) {
+            // 第一页：覆盖 salt 为 SQLite 文件头，然后写入解密数据 + 填充
+            if (outFile.write(sqliteHeader) != 16) {
+                qWarning() << "Failed to write SQLite header";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
+            // 写入解密内容（4096 - 16 = 4080 字节）
+            if (outFile.write(decryptedPage) != decryptedPage.size()) {
+                qWarning() << "Failed to write decrypted page 0 content";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
+            // 填充到完整页面大小
+            int padding = PAGE_SIZE - 16 - decryptedPage.size();
+            if (padding > 0) {
+                QByteArray paddingBytes(padding, '\0');
+                outFile.write(paddingBytes);
+            }
+            firstPageWritten = true;
         } else {
-            decryptedData.append(decryptedPage);
+            // 其他页：直接写入解密内容
+            if (outFile.write(decryptedPage) != decryptedPage.size()) {
+                qWarning() << "Failed to write decrypted page" << i;
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
         }
     }
 
-    // 写入解密后的文件
-    QFile outFile(outputPath);
-    if (!outFile.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to open output file:" << outputPath;
-        return false;
-    }
-
-    outFile.write(decryptedData);
+    inFile.close();
     outFile.close();
 
-    qDebug() << "Database decrypted successfully:" << outputPath;
-    return true;
+    qDebug() << "Database decrypted successfully:" << outputPath << "(streaming mode)";
+    return firstPageWritten;
 }
 
 QByteArray WeChatDecoder::aes256CbcDecrypt(const QByteArray& key, const QByteArray& iv, const QByteArray& data) {
@@ -499,7 +583,7 @@ QByteArray WeChatDecoder::aes256CbcDecrypt(const QByteArray& key, const QByteArr
     }
 
     // 初始化 AES-256-CBC 解密
-    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, 
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr,
                            reinterpret_cast<const unsigned char*>(key.data()),
                            reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
         qCritical() << "EVP_DecryptInit_ex failed";
@@ -520,10 +604,12 @@ QByteArray WeChatDecoder::aes256CbcDecrypt(const QByteArray& key, const QByteArr
         return QByteArray();
     }
 
+    // 关键修复：检测 EVP_DecryptFinal_ex 失败（说明密钥错误或数据损坏）
+    // 之前静默忽略会导致错误的密钥也"成功"解密，产生乱码数据
     if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(result.data()) + outLen1, &outLen2) != 1) {
-        qWarning() << "EVP_DecryptFinal_ex failed (may be expected for raw pages)";
-        // 对于数据库页面，Final 失败可能是正常的
-        outLen2 = 0;
+        qWarning() << "EVP_DecryptFinal_ex failed - key may be wrong or data is corrupted";
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
     }
 
     EVP_CIPHER_CTX_free(ctx);

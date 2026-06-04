@@ -11,14 +11,13 @@
 #include <psapi.h>
 #include "../core/WeChatDecoder.h"
 
-WeChatAdapter::WeChatAdapter(QObject* parent) 
-    : QObject(parent), m_decoder(new WeChatDecoder()), m_initialized(false) {
+WeChatAdapter::WeChatAdapter(QObject* parent)
+    : QObject(parent), m_decoder(std::make_unique<WeChatDecoder>()), m_initialized(false),
+      m_availableCache(false), m_availableCached(false) {
     m_platformIcon.addFile(":/icons/wechat.png");
 }
 
-WeChatAdapter::~WeChatAdapter() {
-    delete m_decoder;
-}
+WeChatAdapter::~WeChatAdapter() = default;
 
 Platform WeChatAdapter::platform() const {
     return Platform::WeChat;
@@ -33,7 +32,11 @@ QIcon WeChatAdapter::icon() const {
 }
 
 bool WeChatAdapter::isAvailable() const {
-    return !findWeChatDataDirs().isEmpty();
+    if (!m_availableCached) {
+        m_availableCache = !findWeChatDataDirs().isEmpty();
+        m_availableCached = true;
+    }
+    return m_availableCache;
 }
 
 QStringList WeChatAdapter::findWeChatDataDirs() {
@@ -63,10 +66,9 @@ QStringList WeChatAdapter::findWeChatDataDirs() {
         }
     }
     
-    // 使用 Settings 中配置的安装目录获取用户名（部分微信版本将数据放在安装目录下）
-    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    // 使用 QStandardPaths 获取文档目录（跨平台兼容）
     QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    
+
     QString wechatFilesPath = docPath + "/WeChat Files";
     QDir wechatDir(wechatFilesPath);
     
@@ -130,7 +132,6 @@ QList<Contact> WeChatAdapter::getContacts() {
         return contacts;
     }
 
-    QString key = m_keys.isEmpty() ? QString() : m_keys.first();
     QList<WeChatContact> weChatContacts = m_decoder->getAllContacts(m_dataDir, m_keys.isEmpty() ? QString() : m_keys.first());
     
     for (const WeChatContact& wc : weChatContacts) {

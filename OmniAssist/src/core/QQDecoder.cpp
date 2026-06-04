@@ -26,7 +26,7 @@ static QString generateUniqueConnectionName(const QString& prefix) {
     return QString("%1_%2").arg(prefix).arg(++dbConnectionCounter);
 }
 
-QQDecoder::QQDecoder() : m_foundKeys(nullptr) {
+QQDecoder::QQDecoder() {
 }
 
 QQDecoder::~QQDecoder() {
@@ -34,13 +34,20 @@ QQDecoder::~QQDecoder() {
 
 QString QQDecoder::findQQDataDir() {
     QStringList possiblePaths;
-    
+
     QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
-    
-    possiblePaths << "C:/Users/" + userName + "/Documents/Tencent Files";
-    possiblePaths << "C:/Users/" + userName + "/AppData/Roaming/Tencent/QQ";
+    QString docPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+
+    // 跨平台优先使用 QStandardPaths
+    possiblePaths << docPath + "/Tencent Files";
     possiblePaths << appData + "/Tencent/QQ";
+
+    // Windows 特定路径（用户目录）
+    QString userName = QString::fromUtf8(qgetenv("USERNAME"));
+    if (!userName.isEmpty()) {
+        possiblePaths << "C:/Users/" + userName + "/Documents/Tencent Files";
+        possiblePaths << "C:/Users/" + userName + "/AppData/Roaming/Tencent/QQ";
+    }
 
     for (const QString& path : possiblePaths) {
         QDir dir(path);
@@ -131,12 +138,23 @@ bool QQDecoder::scanProcessMemory(void* processHandle, QStringList* foundKeys) {
         if (mbi.State == MEM_COMMIT && READABLE.count(mbi.Protect) && 
             mbi.RegionSize > 0 && mbi.RegionSize < 500 * 1024 * 1024) {
             
-            QByteArray memory = readProcessMemory(processHandle, mbi.BaseAddress, mbi.RegionSize);
+            // 分块读取大内存区域
+            const size_t CHUNK_SIZE = 64 * 1024 * 1024;
+            unsigned char* baseAddr = reinterpret_cast<unsigned char*>(mbi.BaseAddress);
+            size_t regionSize = mbi.RegionSize;
+            QByteArray overlapBuffer;
             
-            if (!memory.isEmpty()) {
-                // 精确匹配 SQLite 密钥格式: x'128个十六进制字符'（64 字节密钥）
+            for (size_t offset = 0; offset < regionSize; offset += CHUNK_SIZE) {
+                size_t chunkSize = qMin(static_cast<size_t>(CHUNK_SIZE), regionSize - offset);
+                QByteArray chunk = readProcessMemory(processHandle, baseAddr + offset, chunkSize);
+                
+                if (chunk.isEmpty()) continue;
+                
+                QByteArray searchData = overlapBuffer + chunk;
+                
+                // 精确匹配 SQLite 密钥格式
                 std::regex hex_re(R"(x'([0-9a-fA-F]{128})')", std::regex::icase);
-                std::string data_str(memory.constData(), memory.size());
+                std::string data_str(searchData.constData(), searchData.size());
                 std::smatch match;
                 
                 std::string::const_iterator search_start(data_str.cbegin());
@@ -147,6 +165,13 @@ bool QQDecoder::scanProcessMemory(void* processHandle, QStringList* foundKeys) {
                         qDebug() << "Found potential key:" << key.left(30) << "...";
                     }
                     search_start = match.suffix().first;
+                }
+                
+                // 保留 overlap 用于跨块边界检测
+                if (offset + chunkSize < regionSize && chunk.size() >= 130) {
+                    overlapBuffer = chunk.right(130);
+                } else {
+                    overlapBuffer.clear();
                 }
             }
         }
@@ -162,10 +187,10 @@ bool QQDecoder::scanProcessMemory(void* processHandle, QStringList* foundKeys) {
 }
 
 QByteArray QQDecoder::readProcessMemory(void* processHandle, void* address, size_t size) {
-    // 限制读取大小以防止整数溢出
-    const size_t MAX_READ_SIZE = 100 * 1024 * 1024;  // 100MB
-    if (size > MAX_READ_SIZE) {
-        size = MAX_READ_SIZE;
+    // 防止 size 过大（64MB 上限，配合 scanProcessMemory 的分块逻辑）
+    const size_t MAX_CHUNK = 64 * 1024 * 1024;
+    if (size == 0 || size > MAX_CHUNK) {
+        size = MAX_CHUNK;
     }
     
     QByteArray buffer(static_cast<int>(size), 0);
@@ -202,26 +227,33 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
         return false;
     }
 
-    QByteArray fileData = inFile.readAll();
-    inFile.close();
-
     const int PAGE_SIZE = 4096;
     const int HMAC_SIZE = 20;   // QQ 使用 HMAC-SHA1 (20 字节)
     const int SALT_SIZE = 16;
     const int IV_SIZE = 16;
     const int MAC_SALT_XOR = 0x3a;
 
-    qint64 fileSize = fileData.size();
+    qint64 fileSize = inFile.size();
     if (fileSize % PAGE_SIZE != 0) {
         qWarning() << "File size is not a multiple of page size:" << fileSize;
+        inFile.close();
         return false;
     }
 
-    int numPages = fileSize / PAGE_SIZE;
-    qDebug() << "Decrypting QQ database:" << numPages << "pages";
+    qint64 numPages = fileSize / PAGE_SIZE;
+    qDebug() << "Decrypting QQ database:" << numPages << "pages (streaming mode)";
+
+    // 读取第一页获取 salt
+    QByteArray firstPage(PAGE_SIZE, 0);
+    if (inFile.read(firstPage.data(), PAGE_SIZE) != PAGE_SIZE) {
+        qWarning() << "Failed to read first page";
+        inFile.close();
+        return false;
+    }
+    inFile.seek(0);
 
     // 提取第一页的盐值（前 16 字节）
-    QByteArray salt = fileData.mid(0, SALT_SIZE);
+    QByteArray salt = firstPage.mid(0, SALT_SIZE);
 
     // 生成 MAC 盐值
     QByteArray macSalt(salt);
@@ -237,6 +269,7 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
                            2, EVP_sha1(),
                            32, hmacKeyBuf) != 1) {
         qCritical() << "PBKDF2 key derivation failed for QQ macKey";
+        inFile.close();
         return false;
     }
     QByteArray macKey(reinterpret_cast<char*>(hmacKeyBuf), 32);
@@ -248,24 +281,40 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
                            2, EVP_sha1(),
                            32, fileKeyBuf) != 1) {
         qCritical() << "PBKDF2 key derivation failed for QQ fileKey";
+        inFile.close();
         return false;
     }
     QByteArray fileKey(reinterpret_cast<char*>(fileKeyBuf), 32);
 
-    QByteArray decryptedData;
-    decryptedData.reserve(fileSize);
+    // 准备 SQLite 文件头
+    QByteArray sqliteHeader("SQLite format 3", 16);
+
+    // 打开输出文件
+    QFile outFile(outputPath);
+    if (!outFile.open(QIODevice::WriteOnly)) {
+        qWarning() << "Failed to open output file:" << outputPath;
+        inFile.close();
+        return false;
+    }
+
+    // 流式处理
+    QByteArray page(PAGE_SIZE, 0);
+    bool firstPageWritten = false;
+    int failedPages = 0;  // 跟踪解密失败的页面数
 
     for (qint64 i = 0; i < numPages; i++) {
-        QByteArray page = fileData.mid(i * PAGE_SIZE, PAGE_SIZE);
-        if (page.size() != PAGE_SIZE) {
-            qWarning() << "Page" << i << "size mismatch:" << page.size();
+        if (inFile.read(page.data(), PAGE_SIZE) != PAGE_SIZE) {
+            qWarning() << "Failed to read page" << i;
+            inFile.close();
+            outFile.close();
+            QFile::remove(outputPath);
             return false;
         }
 
         // 提取 HMAC 和数据
         QByteArray storedHmac = page.mid(PAGE_SIZE - HMAC_SIZE, HMAC_SIZE);
         QByteArray pageContent;
-        
+
         if (i == 0) {
             // 第一页: salt(16) + 数据内容 + HMAC(20)
             pageContent = page.mid(SALT_SIZE, PAGE_SIZE - SALT_SIZE - HMAC_SIZE);
@@ -280,7 +329,7 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
              reinterpret_cast<const unsigned char*>(pageContent.data()), pageContent.size(),
              hmacDigest, &hmacLen);
         QByteArray calculatedHmac(reinterpret_cast<char*>(hmacDigest), hmacLen);
-        
+
         if (calculatedHmac != storedHmac) {
             qWarning() << "HMAC verification failed for page" << i;
         }
@@ -293,6 +342,9 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
         EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
         if (!ctx) {
             qCritical() << "Failed to create EVP_CIPHER_CTX";
+            inFile.close();
+            outFile.close();
+            QFile::remove(outputPath);
             return false;
         }
 
@@ -301,6 +353,9 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
                                reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
             qCritical() << "EVP_DecryptInit_ex failed";
             EVP_CIPHER_CTX_free(ctx);
+            inFile.close();
+            outFile.close();
+            QFile::remove(outputPath);
             return false;
         }
 
@@ -313,43 +368,71 @@ bool QQDecoder::decryptDatabase(const QString& dbPath, const QString& outputPath
                               &outLen1, reinterpret_cast<const unsigned char*>(encryptedContent.data()), encryptedContent.size()) != 1) {
             qCritical() << "EVP_DecryptUpdate failed for page" << i;
             EVP_CIPHER_CTX_free(ctx);
+            inFile.close();
+            outFile.close();
+            QFile::remove(outputPath);
             return false;
         }
 
+        // 关键修复：检测 EVP_DecryptFinal_ex 失败（说明密钥错误或数据损坏）
         if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(decryptedPage.data()) + outLen1, &outLen2) != 1) {
-            // 对于数据库页面，Final 失败可能是正常的
-            outLen2 = 0;
-        }
-
-        EVP_CIPHER_CTX_free(ctx);
-        decryptedPage.resize(outLen1 + outLen2);
-
-        // 重组页面
-        if (i == 0) {
-            // 第一页需要恢复完整的 SQLite 文件头 (16 字节: "SQLite format 3\0")
-            QByteArray sqliteHeader("SQLite format 3", 16);
-            decryptedData.append(sqliteHeader);
-            decryptedData.append(decryptedPage);
-            while (decryptedData.size() < PAGE_SIZE) {
-                decryptedData.append('\0');
+            qWarning() << "EVP_DecryptFinal_ex failed for page" << i << "- key may be wrong";
+            EVP_CIPHER_CTX_free(ctx);
+            failedPages++;
+            // 连续失败过多说明密钥错误
+            if (failedPages >= 3) {
+                qCritical() << "Too many consecutive page failures, key is likely wrong";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
             }
+            // 单次失败：使用零填充占位继续
+            decryptedPage = QByteArray(encryptedContent.size(), '\0');
         } else {
-            decryptedData.append(decryptedPage);
+            EVP_CIPHER_CTX_free(ctx);
+            decryptedPage.resize(outLen1 + outLen2);
+        }
+
+        // 写入解密后的页面
+        if (i == 0) {
+            // 第一页：写入 SQLite 文件头 + 解密内容 + 填充
+            if (outFile.write(sqliteHeader) != 16) {
+                qWarning() << "Failed to write SQLite header";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
+            if (outFile.write(decryptedPage) != decryptedPage.size()) {
+                qWarning() << "Failed to write decrypted page 0 content";
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
+            int padding = PAGE_SIZE - 16 - decryptedPage.size();
+            if (padding > 0) {
+                QByteArray paddingBytes(padding, '\0');
+                outFile.write(paddingBytes);
+            }
+            firstPageWritten = true;
+        } else {
+            if (outFile.write(decryptedPage) != decryptedPage.size()) {
+                qWarning() << "Failed to write decrypted page" << i;
+                inFile.close();
+                outFile.close();
+                QFile::remove(outputPath);
+                return false;
+            }
         }
     }
 
-    // 写入解密后的文件
-    QFile outFile(outputPath);
-    if (!outFile.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to open output file:" << outputPath;
-        return false;
-    }
-
-    outFile.write(decryptedData);
+    inFile.close();
     outFile.close();
 
-    qDebug() << "QQ database decrypted successfully:" << outputPath;
-    return true;
+    qDebug() << "QQ database decrypted successfully:" << outputPath << "(streaming mode)";
+    return firstPageWritten;
 }
 
 QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString& key) {
