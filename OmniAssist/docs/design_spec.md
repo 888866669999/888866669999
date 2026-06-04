@@ -95,7 +95,20 @@ struct Contact {
 };
 ```
 
-### 2.4 聊天消息结构
+### 2.4 富媒体文件信息结构
+
+```cpp
+struct MediaFile {
+    QString id;              // 文件唯一标识
+    QString localPath;       // 本地文件路径（如果可用）
+    QString fileName;        // 文件名
+    qint64 fileSize;         // 文件大小（字节）
+    QString fileType;        // 文件类型/扩展名
+    QPixmap thumbnail;       // 缩略图（可选）
+};
+```
+
+### 2.5 聊天消息结构
 
 ```cpp
 struct ChatMessage {
@@ -106,6 +119,7 @@ struct ChatMessage {
     QString content;         // 消息内容
     MessageType type;        // 消息类型
     bool isSelf;             // 是否是自己发送的
+    QList<MediaFile> mediaFiles;  // 富媒体文件列表（可选）
     QVariant extra;          // 平台特定的额外数据
 };
 ```
@@ -186,6 +200,34 @@ public:
      */
     virtual void stopMonitoring() = 0;
 
+    // ========== 富媒体支持（可选功能） ==========
+    
+    /**
+     * @brief 是否支持富媒体文件解析
+     * @return true 表示支持
+     */
+    virtual bool supportsRichMedia() const { return false; }
+    
+    /**
+     * @brief 获取消息的富媒体文件信息
+     * @param msgId 消息ID
+     * @return 富媒体文件列表（可选实现）
+     */
+    virtual QList<MediaFile> getMediaFilesForMessage(const QString& msgId) {
+        Q_UNUSED(msgId);
+        return {};
+    }
+    
+    /**
+     * @brief 解密并获取图片数据
+     * @param mediaFile 媒体文件信息
+     * @return 解密后的图片数据，失败返回空
+     */
+    virtual QPixmap decryptImage(const MediaFile& mediaFile) {
+        Q_UNUSED(mediaFile);
+        return QPixmap();
+    }
+
     // ========== 信号（需在实现中定义） ==========
     // void newMessageReceived(const ChatMessage& msg);
     // void errorOccurred(const QString& error);
@@ -200,6 +242,11 @@ public:
 3. 提供线程安全的实现
 4. 所有数据库操作为只读
 5. 包含详细的中文注释
+
+**可选功能（富媒体支持）**：
+- 如果支持富媒体，重写 `supportsRichMedia()` 返回 true
+- 实现 `getMediaFilesForMessage()` 解析图片、表情、文件等
+- 实现 `decryptImage()` 解密并获取图片数据
 
 ---
 

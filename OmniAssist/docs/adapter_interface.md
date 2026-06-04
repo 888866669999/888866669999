@@ -122,6 +122,49 @@ virtual void stopMonitoring() = 0;
 
 ---
 
+### 富媒体支持接口（可选功能）
+
+#### supportsRichMedia()
+```cpp
+virtual bool supportsRichMedia() const { return false; }
+```
+- **功能**: 指示该平台适配器是否支持富媒体文件解析
+- **返回值**: true 表示支持，false 表示不支持
+- **实现要求**:
+  - 默认返回 false
+  - 如果支持富媒体，重写此方法返回 true
+
+#### getMediaFilesForMessage()
+```cpp
+virtual QList<MediaFile> getMediaFilesForMessage(const QString& msgId) {
+    Q_UNUSED(msgId);
+    return {};
+}
+```
+- **功能**: 获取指定消息的富媒体文件信息
+- **参数**: msgId 消息唯一标识
+- **返回值**: 富媒体文件列表
+- **实现要求**:
+  - 仅在 supportsRichMedia() 返回 true 时调用
+  - 包含图片、表情、文件等
+  - 只读操作
+
+#### decryptImage()
+```cpp
+virtual QPixmap decryptImage(const MediaFile& mediaFile) {
+    Q_UNUSED(mediaFile);
+    return QPixmap();
+}
+```
+- **功能**: 解密并获取图片数据
+- **参数**: mediaFile 媒体文件信息
+- **返回值**: 解密后的图片，失败返回空 QPixmap
+- **实现要求**:
+  - 处理平台特定的图片加密格式
+  - 对于微信 4.x，需要处理 .dat 图片解密
+
+---
+
 ### 信号（必须在实现中定义）
 
 #### newMessageReceived
@@ -144,6 +187,7 @@ void errorOccurred(const QString& error);
 
 创建新适配器时，请确保以下各项：
 
+### 基本功能（必须）
 - [ ] 继承 IPlatformAdapter
 - [ ] 实现所有纯虚函数
 - [ ] 使用 Q_OBJECT 宏（如果需要信号）
@@ -154,6 +198,12 @@ void errorOccurred(const QString& error);
 - [ ] 实现错误处理和报告
 - [ ] 包含平台图标
 - [ ] 更新 docs/platform_specific_notes/ 下的对应文档
+
+### 富媒体支持（可选）
+- [ ] 重写 supportsRichMedia() 返回 true
+- [ ] 实现 getMediaFilesForMessage() 解析富媒体文件
+- [ ] 实现 decryptImage() 解密图片数据
+- [ ] 处理表情、图片、文件等不同类型的富媒体
 
 ---
 
