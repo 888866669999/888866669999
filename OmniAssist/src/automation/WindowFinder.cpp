@@ -27,13 +27,16 @@ BOOL CALLBACK WindowFinder::enumWindowsProc(HWND hwnd, LPARAM lParam) {
     
     int length = GetWindowTextLengthW(hwnd);
     if (length > 0) {
-        std::wstring buffer(length + 1, L'\0');
-        GetWindowTextW(hwnd, &buffer[0], length + 1);
-        QString title = QString::fromStdWString(buffer);
-        
-        if (title.contains(finder->m_titleContains, Qt::CaseInsensitive)) {
-            if (IsWindowVisible(hwnd)) {
-                finder->m_foundWindows.append(hwnd);
+        std::wstring buffer(static_cast<size_t>(length) + 1, L'\0');
+        int actualLength = GetWindowTextW(hwnd, &buffer[0], static_cast<int>(buffer.size()));
+        if (actualLength > 0) {
+            buffer.resize(static_cast<size_t>(actualLength));  // 去掉末尾的 \0
+            QString title = QString::fromStdWString(buffer);
+            
+            if (title.contains(finder->m_titleContains, Qt::CaseInsensitive)) {
+                if (IsWindowVisible(hwnd)) {
+                    finder->m_foundWindows.append(hwnd);
+                }
             }
         }
     }

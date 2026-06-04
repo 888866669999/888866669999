@@ -529,6 +529,9 @@ void MainWindow::loadChatHistory() {
         QString textColor = msg.isSelf ? "#ffffff" : "#eaeaea";
         QString align = msg.isSelf ? "right" : "left";
         
+        // 对消息内容进行 HTML 转义以防止注入
+        QString escapedContent = msg.content.toHtmlEscaped();
+        
         QString html = QString(R"(
             <div style="display: flex; justify-content: %1; margin-bottom: 12px;">
                 <div style="max-width: 70%;">
@@ -539,7 +542,7 @@ void MainWindow::loadChatHistory() {
                     <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%6</div>
                 </div>
             </div>
-        )").arg(align).arg(sender).arg(bubbleColor).arg(textColor).arg(msg.content).arg(timeStr);
+        )").arg(align).arg(sender.toHtmlEscaped()).arg(bubbleColor).arg(textColor).arg(escapedContent).arg(timeStr.toHtmlEscaped());
         
         m_chatView->append(html);
     }
@@ -577,7 +580,7 @@ void MainWindow::onSendClicked() {
                 <div style="color: #6a6a7e; font-size: 10px; margin-top: 4px; padding: 0 8px; text-align: right;">%2%3</div>
             </div>
         </div>
-    )").arg(text).arg(timeStr).arg(sent ? "" : " ⚠️ 发送失败");
+    )").arg(text.toHtmlEscaped()).arg(timeStr.toHtmlEscaped()).arg(sent ? "" : " ⚠️ 发送失败");
     
     m_chatView->append(html);
     m_chatView->verticalScrollBar()->setValue(m_chatView->verticalScrollBar()->maximum());

@@ -80,8 +80,9 @@ QString OpenAIProvider::callApi(const QString& systemPrompt, const QString& user
             }
         }
     } else {
+        QByteArray errorData = reply->readAll();  // 先读取响应体
         qWarning() << "API request failed:" << reply->errorString();
-        qWarning() << "Response:" << reply->readAll();
+        qWarning() << "Response:" << QString::fromUtf8(errorData);
     }
 
     reply->deleteLater();

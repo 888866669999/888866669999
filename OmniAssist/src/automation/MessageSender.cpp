@@ -53,11 +53,15 @@ void MessageSender::pressKey(WORD key) {
 
 bool MessageSender::sendTextViaClipboard(HWND hwnd, const QString& text) {
     QClipboard* clipboard = QGuiApplication::clipboard();
+    // 保存当前剪贴板内容
+    QString oldText = clipboard->text(QClipboard::Clipboard);
+
     clipboard->setText(text, QClipboard::Clipboard);
     QThread::msleep(100);
 
     if (!SetForegroundWindow(hwnd)) {
         qWarning() << "Failed to set foreground window";
+        clipboard->setText(oldText, QClipboard::Clipboard);
         return false;
     }
     QThread::msleep(100);
@@ -81,6 +85,9 @@ bool MessageSender::sendTextViaClipboard(HWND hwnd, const QString& text) {
     SendInput(1, &input, sizeof(INPUT));
     QThread::msleep(100);
 
+    // 恢复剪贴板
+    clipboard->setText(oldText, QClipboard::Clipboard);
+
     return true;
 }
 
@@ -91,23 +98,52 @@ bool MessageSender::sendFileViaClipboard(HWND hwnd, const QString& filePath) {
         return false;
     }
 
+    // 保存当前剪贴板内容
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    const QMimeData* oldMimeData = clipboard->mimeData() ? clipboard->mimeData()->clone() : nullptr;
+
     QList<QUrl> urls;
     urls << QUrl::fromLocalFile(filePath);
     
     QMimeData* mimeData = new QMimeData();
     mimeData->setUrls(urls);
     
-    QClipboard* clipboard = QGuiApplication::clipboard();
     clipboard->setMimeData(mimeData, QClipboard::Clipboard);
     QThread::msleep(100);
 
     if (!SetForegroundWindow(hwnd)) {
         qWarning() << "Failed to set foreground window";
+        if (oldMimeData) clipboard->setMimeData(oldMimeData);
         return false;
     }
+    QThread::msleep(200);
+
+    // 执行 Ctrl+V 粘贴文件
+    INPUT input = {0};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = VK_CONTROL;
+    SendInput(1, &input, sizeof(INPUT));
+    QThread::msleep(10);
+
+    input.ki.wVk = 'V';
+    SendInput(1, &input, sizeof(INPUT));
+    QThread::msleep(10);
+
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    input.ki.wVk = 'V';
+    SendInput(1, &input, sizeof(INPUT));
+    QThread::msleep(10);
+
+    input.ki.wVk = VK_CONTROL;
+    SendInput(1, &input, sizeof(INPUT));
     QThread::msleep(100);
 
-    return sendTextViaClipboard(hwnd, "");
+    // 恢复剪贴板
+    if (oldMimeData) {
+        clipboard->setMimeData(oldMimeData);
+    }
+
+    return true;
 }
 
 bool MessageSender::sendText(Platform platform, const QString& contactId, const QString& text) {

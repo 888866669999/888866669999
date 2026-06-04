@@ -119,7 +119,6 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
     unsigned char* address = reinterpret_cast<unsigned char*>(sysInfo.lpMinimumApplicationAddress);
     unsigned long long maxAddress = reinterpret_cast<unsigned long long>(sysInfo.lpMaximumApplicationAddress);
     
-    const DWORD MEM_COMMIT = 0x1000;
     const std::set<DWORD> READABLE = {0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
 
     while (reinterpret_cast<unsigned long long>(address) < maxAddress) {
@@ -160,11 +159,17 @@ bool WeChatDecoder::scanProcessMemory(void* processHandle) {
 }
 
 QByteArray WeChatDecoder::readProcessMemory(void* processHandle, void* address, size_t size) {
-    QByteArray buffer(size, 0);
+    // 限制读取大小以防止整数溢出
+    const size_t MAX_READ_SIZE = 100 * 1024 * 1024;  // 100MB
+    if (size > MAX_READ_SIZE) {
+        size = MAX_READ_SIZE;
+    }
+    
+    QByteArray buffer(static_cast<int>(size), 0);
     SIZE_T bytesRead = 0;
     
     if (ReadProcessMemory((HANDLE)processHandle, address, buffer.data(), size, &bytesRead)) {
-        buffer.resize(bytesRead);
+        buffer.resize(static_cast<int>(bytesRead));
         return buffer;
     }
     
@@ -211,29 +216,13 @@ bool WeChatDecoder::verifyKey(const QString& key, const QString& dbPath) {
 }
 
 QByteArray WeChatDecoder::deriveKey(const QByteArray& password, const QByteArray& salt, int iterations, int dklen) {
-    const int blockSize = 64;
-    QByteArray result;
-    result.reserve(dklen);
-    
-    QByteArray currentSalt = salt;
-    QByteArray digest;
-    
-    while (result.size() < dklen) {
-        digest = hmacSha512(password, currentSalt);
-        QByteArray block = digest;
-        
-        for (int i = 1; i < iterations; i++) {
-            digest = hmacSha512(password, digest);
-            for (int j = 0; j < block.size() && j < digest.size(); j++) {
-                block[j] = block[j] ^ digest[j];
-            }
-        }
-        
-        result.append(block.left(qMin(block.size(), dklen - result.size())));
-        currentSalt = block;
-    }
-    
-    return result;
+    // 使用 OpenSSL 的 PKCS5_PBKDF2_HMAC 实现标准 PBKDF2
+    QByteArray key(dklen, 0);
+    PKCS5_PBKDF2_HMAC(password.data(), password.size(),
+                       reinterpret_cast<const unsigned char*>(salt.data()), salt.size(),
+                       iterations, EVP_sha1(),
+                       dklen, reinterpret_cast<unsigned char*>(key.data()));
+    return key;
 }
 
 QByteArray WeChatDecoder::hmacSha512(const QByteArray& key, const QByteArray& data) {

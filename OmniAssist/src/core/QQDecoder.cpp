@@ -12,9 +12,18 @@
 #include <regex>
 #include <set>
 #include <algorithm>
+#include <QMutex>
+
+// 用于生成唯一数据库连接名称的计数器
+static QMutex dbMutex;
+static int dbConnectionCounter = 0;
+
+static QString generateUniqueConnectionName(const QString& prefix) {
+    QMutexLocker locker(&dbMutex);
+    return QString("%1_%2").arg(prefix).arg(++dbConnectionCounter);
+}
 
 QQDecoder::QQDecoder() : m_foundKeys(nullptr) {
-    QSqlDatabase::removeDatabase("qq_connection");
 }
 
 QQDecoder::~QQDecoder() {
@@ -109,7 +118,6 @@ bool QQDecoder::scanProcessMemory(void* processHandle) {
     unsigned char* address = reinterpret_cast<unsigned char*>(sysInfo.lpMinimumApplicationAddress);
     unsigned long long maxAddress = reinterpret_cast<unsigned long long>(sysInfo.lpMaximumApplicationAddress);
     
-    const DWORD MEM_COMMIT = 0x1000;
     const std::set<DWORD> READABLE = {0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
 
     while (reinterpret_cast<unsigned long long>(address) < maxAddress) {
@@ -150,11 +158,17 @@ bool QQDecoder::scanProcessMemory(void* processHandle) {
 }
 
 QByteArray QQDecoder::readProcessMemory(void* processHandle, void* address, size_t size) {
-    QByteArray buffer(size, 0);
+    // 限制读取大小以防止整数溢出
+    const size_t MAX_READ_SIZE = 100 * 1024 * 1024;  // 100MB
+    if (size > MAX_READ_SIZE) {
+        size = MAX_READ_SIZE;
+    }
+    
+    QByteArray buffer(static_cast<int>(size), 0);
     SIZE_T bytesRead = 0;
     
     if (ReadProcessMemory((HANDLE)processHandle, address, buffer.data(), size, &bytesRead)) {
-        buffer.resize(bytesRead);
+        buffer.resize(static_cast<int>(bytesRead));
         return buffer;
     }
     
@@ -174,12 +188,13 @@ QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString&
         return contacts;
     }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "qq_connection");
+    QString connectionName = generateUniqueConnectionName("qq_contacts");
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(msgDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
-        QSqlDatabase::removeDatabase("qq_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return contacts;
     }
 
@@ -191,7 +206,7 @@ QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString&
         if (!query.exec(sql)) {
             qWarning() << "Query failed:" << query.lastError().text();
             db.close();
-            QSqlDatabase::removeDatabase("qq_connection");
+            QSqlDatabase::removeDatabase(connectionName);
             return contacts;
         }
     }
@@ -233,7 +248,7 @@ QList<QQContact> QQDecoder::getAllContacts(const QString& dbPath, const QString&
     }
 
     db.close();
-    QSqlDatabase::removeDatabase("qq_connection");
+    QSqlDatabase::removeDatabase(connectionName);
     
     qDebug() << "Loaded" << contacts.size() << "QQ contacts";
     return contacts;
@@ -253,12 +268,13 @@ QList<QQMessage> QQDecoder::getChatHistory(const QString& dbPath, const QString&
         return messages;
     }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "qq_connection");
+    QString connectionName = generateUniqueConnectionName("qq_messages");
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(msgDbPath);
 
     if (!db.open()) {
         qWarning() << "Failed to open database:" << db.lastError().text();
-        QSqlDatabase::removeDatabase("qq_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return messages;
     }
 
@@ -277,7 +293,7 @@ QList<QQMessage> QQDecoder::getChatHistory(const QString& dbPath, const QString&
     if (!query.exec()) {
         qWarning() << "Query failed:" << query.lastError().text();
         db.close();
-        QSqlDatabase::removeDatabase("qq_connection");
+        QSqlDatabase::removeDatabase(connectionName);
         return messages;
     }
 
@@ -297,7 +313,7 @@ QList<QQMessage> QQDecoder::getChatHistory(const QString& dbPath, const QString&
     std::reverse(messages.begin(), messages.end());
 
     db.close();
-    QSqlDatabase::removeDatabase("qq_connection");
+    QSqlDatabase::removeDatabase(connectionName);
     
     qDebug() << "Loaded" << messages.size() << "QQ messages for" << talkerId;
     return messages;
